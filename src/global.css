@@ -1,0 +1,55 @@
+/* global.css */
+
+/* Tailwind */
+@import "tailwindcss";
+
+/* ===== Theme Tokens (light defaults) ===== */
+@theme {
+  /* active tokens used by UI */
+  --color-bg: var(--color-bg-light);
+  --color-fg: var(--color-fg-light);
+  --color-surface: var(--color-surface-light);
+  --color-border: var(--color-border-light);
+  --color-muted: var(--color-muted-light);
+  --color-accent: #3b82f6; /* blue-500 */
+
+  /* light palette */
+  --color-bg-light: #f6f7fb;       /* very light slate */
+  --color-fg-light: #0f172a;       /* slate-900 */
+  --color-surface-light: #ffffff;  /* white cards */
+  --color-border-light: #e5e7eb;   /* gray-200 */
+  --color-muted-light: #475569;    /* slate-600 */
+
+  /* dark palette */
+  --color-bg-dark: #0f172a;        /* slate-900 */
+  --color-fg-dark: #e5e7ef;        /* slate-100-ish */
+  --color-surface-dark: #111827;   /* gray-900 / card */
+  --color-border-dark: #253047;    /* slate-800/700 mix */
+  --color-muted-dark: #a8b3c7;     /* slate-300 */
+}
+
+/* Base */
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Ensure readable selection & placeholders */
+::selection { background: var(--color-accent); color: white; }
+input::placeholder, textarea::placeholder {
+  color: var(--color-muted);
+  opacity: .85;
+}
+
+/* Dark mode toggles tokens */
+.dark {
+  --color-bg: var(--color-bg-dark);
+  --color-fg: var(--color-fg-dark);
+  --color-surface: var(--color-surface-dark);
+  --color-border: var(--color-border-dark);
+  --color-muted: var(--color-muted-dark);
+}
