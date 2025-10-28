@@ -49,7 +49,7 @@ export default function Home() {
                   : "Set your city to personalize your feed"}
               </div>
               <div className="mt-1 text-[13px] text-[var(--color-muted)]">
-                <span className="font-medium text-[var(--color-fg)]">CityKul</span> — Discover events, jobs, deals and solve civic issues together.
+                <span className="font-medium text-[var(--color-fg)]">CityKul</span> — Discover places & rentals, find events/jobs, and solve civic issues together.
               </div>
             </div>
 
@@ -86,9 +86,29 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* NEW: uniform quick links */}
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:max-w-md">
+            <Link
+              to="/discover"
+              className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-3 hover:shadow transition"
+            >
+              <div className="text-xl">🧭</div>
+              <div className="font-semibold mt-1">Discover</div>
+              <div className="text-[11px] text-[var(--color-muted)]">New shops, hotels, restaurants…</div>
+            </Link>
+            <Link
+              to="/rentals"
+              className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-3 hover:shadow transition"
+            >
+              <div className="text-xl">🏠</div>
+              <div className="font-semibold mt-1">Local Rentals</div>
+              <div className="text-[11px] text-[var(--color-muted)]">Rooms, bikes, tools, more</div>
+            </Link>
+          </div>
         </div>
 
-        {/* 2-up grid with right rail promotions */}
+        {/* 2-up grid with right rail promotions (unchanged core sections) */}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
           {/* Left column */}
           <div className="grid gap-6">

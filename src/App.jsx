@@ -18,9 +18,9 @@ import Promotions from "./pages/Promotions";
 import Wallet from "./pages/Wallet";
 import Review from "./pages/Review";
 import Friends from "./pages/Friends";
-import People from "./pages/People"; // NEW
+import People from "./pages/People";
 
-// Submit
+// Submit (existing)
 import SubmitEvent from "./pages/SubmitEvent";
 import SubmitJob from "./pages/SubmitJob";
 import SubmitDeal from "./pages/SubmitDeal";
@@ -36,8 +36,18 @@ import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Safety from "./pages/Safety";
 
-// NEW: Trending (More from “Trending in your city”)
+// NEW: Trending
 import TrendingNST from "./pages/TrendingNST";
+
+// Rentals pages (existing)
+import RentalList from "./pages/RentalList";
+import RentalForm from "./pages/RentalForm";
+import RentalDetail from "./pages/RentalDetail";
+
+// Discover pages (USE YOUR EXISTING FILES)
+import DiscoverList from "./pages/DiscoverList";
+import DiscoverForm from "./pages/DiscoverForm";
+import DiscoverDetail from "./pages/DiscoverDetail";
 
 // Chat provider
 import { ChatProvider } from "./components/ChatProvider";
@@ -70,7 +80,7 @@ export default function App() {
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/review" element={<Review />} />
           <Route path="/friends" element={<Friends />} />
-          <Route path="/people" element={<People />} /> {/* NEW: fixes People button */}
+          <Route path="/people" element={<People />} />
 
           {/* Details & utilities */}
           <Route path="/event/:id" element={<EventDetail />} />
@@ -85,7 +95,17 @@ export default function App() {
           {/* NEW: Trending “More” page */}
           <Route path="/trending" element={<TrendingNST />} />
 
-          {/* Submit forms */}
+          {/* Rentals */}
+          <Route path="/rentals" element={<RentalList />} />
+          <Route path="/rentals/new" element={<RentalForm />} />
+          <Route path="/rentals/:id" element={<RentalDetail />} />
+
+          {/* Discover (YOUR existing files) */}
+          <Route path="/discover" element={<DiscoverList />} />
+          <Route path="/discover/new" element={<DiscoverForm />} />
+          <Route path="/discover/:id" element={<DiscoverDetail />} />
+
+          {/* Submit forms (existing) */}
           <Route path="/submit-event" element={<SubmitEvent />} />
           <Route path="/submit-job" element={<SubmitJob />} />
           <Route path="/submit-deal" element={<SubmitDeal />} />

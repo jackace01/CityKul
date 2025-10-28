@@ -1,43 +1,35 @@
-import { loadJSON, saveJSON } from "../storage";
+// src/lib/api/jobs.js
+import {
+  submit, listApproved, listPending, vote, tryFinalize,
+  ensureReviewer, getReviewers, quorumNeeded
+} from "../review.js";
 
-const KEY_SUB = "citykul:jobs:submissions";
-const KEY_APP = "citykul:jobs:approved";
-/*
-  Job: { id, title, org, type, location, salary, description, city, locality, status, createdBy, createdAt, mode: "formal"|"gig" }
-*/
-export function listApprovedJobs() {
-  const arr = loadJSON(KEY_APP, []);
-  return arr.sort((a,b)=>b.createdAt-a.createdAt);
+function toShape(rec) {
+  const d = rec.data || {};
+  return {
+    id: rec.id,
+    approved: rec.status === "approved",
+    title: d.title || "Job",
+    org: d.company || d.org || "",
+    type: d.type || d.category || "General",
+    location: d.location || d.locality || rec.city,
+    city: rec.city,
+    createdAt: rec.createdAt,
+    ownerId: d.ownerId || ""
+  };
 }
-export function listPendingJobs() {
-  const arr = loadJSON(KEY_SUB, []);
-  return arr.sort((a,b)=>b.createdAt-a.createdAt);
+
+export function submitJob(payload) { return submit("jobs", payload); }
+export function listPendingJobs(city) { return listPending(city, "jobs").map(toShape); }
+export function listApprovedJobs(city) {
+  const c = city || localStorage.getItem("citykul:city") || "Indore";
+  return listApproved(c, "jobs").map(toShape);
 }
-export function submitJob(payload) {
-  const list = listPendingJobs();
-  const j = { ...payload, id: crypto.randomUUID(), status:"pending", createdAt: Date.now() };
-  list.unshift(j);
-  saveJSON(KEY_SUB, list);
-  return j;
+export function voteJob(id, reviewerId, approve) {
+  vote("jobs", id, reviewerId, approve);
+  return tryFinalize("jobs", id);
 }
-export function approveJob(id) {
-  const pending = listPendingJobs();
-  const idx = pending.findIndex(d=>d.id===id);
-  if (idx<0) return;
-  const [job] = pending.splice(idx,1);
-  job.status="approved";
-  const approved = listApprovedJobs();
-  approved.unshift(job);
-  saveJSON(KEY_SUB, pending);
-  saveJSON(KEY_APP, approved);
-  return job;
-}
-export function rejectJob(id, reason="Not enough details") {
-  const pending = listPendingJobs();
-  const idx = pending.findIndex(d=>d.id===id);
-  if (idx<0) return;
-  pending[idx].status="rejected";
-  pending[idx].reason = reason;
-  saveJSON(KEY_SUB, pending);
-  return pending[idx];
-}
+// reviewers
+export function ensureJobsReviewer(city, reviewerId) { ensureReviewer(city, "jobs", reviewerId); }
+export function getJobsReviewers(city) { return getReviewers(city, "jobs"); }
+export function getJobsQuorum(city) { return quorumNeeded(city, "jobs"); }

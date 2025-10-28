@@ -4,20 +4,51 @@ import Section from "../components/Section";
 import Card from "../components/Card";
 import { deals } from "../lib/data";
 import { Link } from "react-router-dom";
-import { isMember } from "../lib/auth";
+import { getUser, isMember } from "../lib/auth";
+import { listApprovedListings, ensureMarketplaceReviewer } from "../lib/api/marketplace";
 
 export default function Marketplace() {
   const member = isMember();
-  const top = deals.slice(0, 5);
+  const user = getUser();
+
+  if (user?.city && user?.member) ensureMarketplaceReviewer(user.city, user.email || user.name || "user");
+
+  // Existing demo data
+  const topDemo = deals.slice(0, 5);
+
+  // New: approved listings for the user’s city appear first
+  const approved = listApprovedListings(user?.city);
 
   return (
     <Layout>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* Main 2-up grid */}
         <div className="grid gap-6 md:grid-cols-2">
-          <Section title="Hot Deals">
+          <Section title="City Listings (Verified)">
+            {approved.length ? (
+              <div className="grid sm:grid-cols-2 gap-3">
+                {approved.map((d) => (
+                  <Card key={d.id}>
+                    <h3 className="font-semibold">{d.title}</h3>
+                    <p className="text-sm text-[var(--color-muted)]">
+                      {d.where} {Number.isFinite(d.price) ? `· ₹${d.price}` : ""}
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Link to="/marketplace" className="px-3 py-1 rounded bg-[var(--color-accent)] text-white">
+                        Contact
+                      </Link>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--color-muted)]">No approved listings yet.</div>
+            )}
+          </Section>
+
+          <Section title="Hot Deals (Demo)">
             <div className="grid sm:grid-cols-2 gap-3">
-              {top.map((d, idx) => (
+              {topDemo.map((d, idx) => (
                 <Card key={idx}>
                   <h3 className="font-semibold">{d.title}</h3>
                   <p className="text-sm text-[var(--color-muted)]">{d.where}</p>

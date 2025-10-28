@@ -1,15 +1,21 @@
 // src/pages/Events.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import Card from "../components/Card";
 import Section from "../components/Section";
 import { Link } from "react-router-dom";
-import { isMember } from "../lib/auth";
-import BecomeMemberButton from "../components/BecomeMemberButton";
-import { listApprovedEvents } from "../lib/api/events";
+import { getUser, isMember } from "../lib/auth";
+
+import {
+  listApprovedEvents,
+  ensureEventReviewer,
+  getEventReviewers,
+  getEventQuorum,
+} from "../lib/api/events";
+
+import { bump, score } from "../lib/engagement";
 
 function toDate(e) {
-  // Try to build a Date from event.date + event.time; fall back to createdAt
   try {
     if (e.date) {
       const iso = e.time ? `${e.date}T${e.time}` : `${e.date}T00:00`;
@@ -22,14 +28,19 @@ function toDate(e) {
 export default function Events() {
   const [q, setQ] = useState("");
   const member = isMember();
+  const user = getUser();
 
-  // pull approved events and sort by soonest (upcoming-first)
+  // Ensure current user (if member) is registered as reviewer for their city (so they can vote via Review page if assigned)
+  useEffect(() => {
+    if (user?.city && user?.member) ensureEventReviewer(user.city, user.email || user.name || "user");
+  }, [user?.city, user?.member]);
+
   const approved = useMemo(() => {
-    const arr = listApprovedEvents();
+    const arr = listApprovedEvents(user?.city);
+    // keep upcoming first
     return [...arr].sort((a, b) => toDate(a) - toDate(b));
-  }, []);
+  }, [user?.city]);
 
-  // quick text filter
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return approved.filter((e) =>
@@ -37,26 +48,34 @@ export default function Events() {
     );
   }, [approved, q]);
 
-  // Top 5 upcoming (date asc)
-  const topFive = filtered.slice(0, 5);
+  // ENGAGEMENT-BASED TOP 5 (not just upcoming)
+  const ranked = [...filtered].sort((a, b) => score(b.id) - score(a.id));
+  const topFive = ranked.slice(0, 5);
 
-  // Build category map for the rest (excluding ones already in top)
-  const rest = filtered.slice(5);
+  // Group rest by category
+  const rest = filtered.filter((e) => !topFive.find((t) => t.id === e.id));
   const byCat = useMemo(() => {
     const map = {};
     for (const e of rest) {
       const k = e.category || "General";
       if (!map[k]) map[k] = [];
-      if (map[k].length < 6) map[k].push(e); // show up to 6 per category
+      if (map[k].length < 6) map[k].push(e);
     }
     return map;
   }, [rest]);
-
   const catKeys = Object.keys(byCat).sort((a, b) => a.localeCompare(b));
+
+  // Display quorum info (optional helper line)
+  const reviewers = getEventReviewers(user?.city || "Indore");
+  const quorum = getEventQuorum(user?.city || "Indore");
 
   return (
     <Layout>
       <Section title="Upcoming Events">
+        <div className="mb-2 text-[11px] text-[var(--color-muted)]">
+          Reviewers in {user?.city || "your city"}: {reviewers.length} · Quorum: {quorum}
+        </div>
+
         {/* Search + Add Event */}
         <div className="mb-4 flex items-center gap-2 flex-wrap">
           <input
@@ -73,13 +92,15 @@ export default function Events() {
               + Add Event
             </Link>
           ) : (
-            <BecomeMemberButton label="Become a member" />
+            <Link to="/membership" className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">
+              Become a member
+            </Link>
           )}
         </div>
 
-        {/* Top 5 upcoming */}
+        {/* Top 5 by engagement */}
         <div className="mb-6">
-          <div className="text-sm font-semibold mb-2">Top 5 Upcoming</div>
+          <div className="text-sm font-semibold mb-2">Top 5 (by engagement)</div>
           {topFive.length ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {topFive.map((e) => (
@@ -92,18 +113,12 @@ export default function Events() {
                   <p className="text-xs text-[var(--color-muted)] mt-1">
                     Category: {e.category || "General"}
                   </p>
-                  {e.fee && (
-                    <p className="text-xs text-[var(--color-muted)] mt-1">
-                      Fee: {e.fee}
-                    </p>
-                  )}
                   <div className="mt-3 flex gap-2">
-                    <Link
-                      to={`/event/${encodeURIComponent(e.id)}`}
-                      className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]"
-                    >
-                      Details
-                    </Link>
+                    <button className="px-3 py-1 rounded bg-[var(--color-accent)] text-white" onClick={() => bump(e.id, "likes")}>Like</button>
+                    <button className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]" onClick={() => bump(e.id, "shares")}>Share</button>
+                    <button className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]" onClick={() => bump(e.id, "comments")}>Comment</button>
+                    <button className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]" onClick={() => bump(e.id, "interests")}>Interested</button>
+                    <Link to={`/event/${encodeURIComponent(e.id)}`} className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]">Details</Link>
                   </div>
                 </Card>
               ))}
@@ -130,12 +145,8 @@ export default function Events() {
                         {e.time ? ` · ${e.time}` : ""} {e.place ? `· ${e.place}` : ""}
                       </p>
                       <div className="mt-3 flex gap-2">
-                        <Link
-                          to={`/event/${encodeURIComponent(e.id)}`}
-                          className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]"
-                        >
-                          Details
-                        </Link>
+                        <button className="px-3 py-1 rounded bg-[var(--color-accent)] text-white" onClick={() => bump(e.id, "likes")}>Like</button>
+                        <Link to={`/event/${encodeURIComponent(e.id)}`} className="px-3 py-1 rounded ring-1 ring-[var(--color-border)]">Details</Link>
                       </div>
                     </Card>
                   ))}
