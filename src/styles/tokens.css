@@ -1,0 +1,96 @@
+/* Design Tokens: Colors, Radii, Shadows, Spacing, Motion, Z-index */
+:root {
+  /* Brand & surfaces */
+  --color-app: #0b0c10;           /* app bg */
+  --color-surface: #111216;       /* cards/sections */
+  --color-fg: #E6E8ED;            /* primary text */
+  --color-muted: #9AA3B2;         /* secondary text */
+  --color-border: #23262E;        /* hairline/rings */
+
+  /* Accents & semantics */
+  --color-accent: #6C5CE7;        /* brand accent (buttons, highlights) */
+  --color-accent-contrast: #ffffff;
+
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger:  #EF4444;
+  --color-info:    #3B82F6;
+
+  /* Status pills (mapped in StatusPill.jsx) */
+  --status-created-bg:    transparent;
+  --status-created-fg:    var(--color-fg);
+
+  --status-paid-bg:       #2563EB;
+  --status-paid-fg:       #ffffff;
+
+  --status-accepted-bg:   #4F46E5;
+  --status-accepted-fg:   #ffffff;
+
+  --status-inuse-bg:      #D97706;
+  --status-inuse-fg:      #101216;
+
+  --status-returned-bg:   #14B8A6;
+  --status-returned-fg:   #0a0b0f;
+
+  --status-completed-bg:  #16A34A;
+  --status-completed-fg:  #0a0b0f;
+
+  --status-canceled-bg:   #6B7280;
+  --status-canceled-fg:   #0a0b0f;
+
+  --status-disputed-bg:   #DC2626;
+  --status-disputed-fg:   #ffffff;
+
+  /* Radii */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 1px rgba(0,0,0,.25);
+  --shadow-md: 0 6px 16px rgba(0,0,0,.32);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,.38);
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --easing: cubic-bezier(.2,.6,.3,1);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 3px rgba(108,92,231,.35);
+
+  /* Map ring */
+  --map-ring: var(--color-border);
+}
+
+/* Light scheme (optional if you enable a theme toggle later) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-app: #F6F7FB;
+    --color-surface: #FFFFFF;
+    --color-fg: #0E1014;
+    --color-muted: #596074;
+    --color-border: #E6E8F0;
+
+    --color-accent: #5B4AE6;
+    --color-accent-contrast: #ffffff;
+
+    --status-created-fg: #0E1014;
+    --status-inuse-fg:   #0E1014;
+    --status-returned-fg:#0E1014;
+    --status-completed-fg:#0E1014;
+    --status-canceled-fg:#0E1014;
+  }
+}
+
+/* High contrast mode (opt-in via data attribute) */
+:root[data-contrast="high"] {
+  --color-border: #9AA3B2;
+  --focus-ring: 0 0 0 3px rgba(255,255,0,.7);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration-fast: 1ms; --duration-base: 1ms; }
+}

@@ -1,7 +1,6 @@
 // src/pages/Review.jsx
-// Reviewer dashboard with 80% quorum voting.
-// Keeps your original Events / Marketplace / Jobs queues and ADDS Discover + Local Rentals.
-// Nothing removed—just extended.
+// Reviewer dashboard with weighted quorum (engine v2).
+// Keeps your previous queues (Events, Marketplace, Jobs) + Discover + Rentals.
 
 import Layout from "../components/Layout";
 import Section from "../components/Section";
@@ -9,7 +8,6 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getUser, isMember } from "../lib/auth";
 
-/* ---- Existing modules (as in your OLD file) ---- */
 import {
   listPendingEvents,
   voteEvent,
@@ -31,7 +29,6 @@ import {
   getJobsQuorum
 } from "../lib/api/jobs";
 
-/* ---- New modules added (Discover + Rentals) ---- */
 import {
   listPendingDiscover,
   voteDiscover,
@@ -46,12 +43,6 @@ import {
   getRentalsQuorum
 } from "../lib/api/rentals";
 
-/* ------------------------------------------------ */
-/* Generic queue renderer (extended from your OLD). */
-/* Now supports:
-   - optional detail fields (address/price/description)
-   - custom preview path resolver
-*/
 function ModuleQueue({
   title,
   rows,
@@ -59,11 +50,13 @@ function ModuleQueue({
   onReject,
   quorumText,
   emptyText,
-  getPreviewPath // (row) => string | null
+  getPreviewPath
 }) {
   return (
     <Section title={title}>
-      <div className="text-xs text-[var(--color-muted)] mb-2">{quorumText}</div>
+      <div className="text-[11px] text-[var(--color-muted)] mb-2">
+        {quorumText} <span className="opacity-70">· Weighted approvals enabled</span>
+      </div>
 
       {rows.length ? (
         <div className="space-y-3">
@@ -83,19 +76,14 @@ function ModuleQueue({
 
                 <h3 className="font-semibold">{q.name || q.title}</h3>
 
-                {/* Secondary line (time/org/venue/price) */}
                 <div className="text-sm text-[var(--color-muted)]">
-                  {/* Events */}
                   {q.date ? `${q.date}` : ""}
                   {q.time ? ` · ${q.time}` : ""}
                   {q.place ? ` · ${q.place}` : ""}
-                  {/* Jobs */}
                   {q.org ? ` · ${q.org}` : ""}
-                  {/* Rentals */}
                   {q.price ? ` · Price: ${q.price}` : ""}
                 </div>
 
-                {/* Optional address/description */}
                 {q.address ? (
                   <div className="text-xs text-[var(--color-muted)] mt-1">{q.address}</div>
                 ) : null}
@@ -146,14 +134,12 @@ export default function Review() {
   const [tick, setTick] = useState(0);
   const refresh = () => setTick((t) => t + 1);
 
-  /* ---- Rows (same logic as OLD + new ones) ---- */
-  const evRows   = useMemo(() => listPendingEvents(city),     [tick, city]);
-  const mpRows   = useMemo(() => listPendingListings(city),   [tick, city]);
-  const jobRows  = useMemo(() => listPendingJobs(city),       [tick, city]);
-  const discRows = useMemo(() => listPendingDiscover(city),   [tick, city]);
-  const rentRows = useMemo(() => listPendingRentals(city),    [tick, city]);
+  const evRows   = useMemo(() => listPendingEvents(city),   [tick, city]);
+  const mpRows   = useMemo(() => listPendingListings(city), [tick, city]);
+  const jobRows  = useMemo(() => listPendingJobs(city),     [tick, city]);
+  const discRows = useMemo(() => listPendingDiscover(city), [tick, city]);
+  const rentRows = useMemo(() => listPendingRentals(city),  [tick, city]);
 
-  /* ---- Quorum strings (OLD + new) ---- */
   const evQuorum   = `${getEventReviewers(city).length} reviewers · Quorum ${getEventQuorum(city)}`;
   const mpQuorum   = `${getMarketplaceReviewers(city).length} reviewers · Quorum ${getMarketplaceQuorum(city)}`;
   const jobQuorum  = `${getJobsReviewers(city).length} reviewers · Quorum ${getJobsQuorum(city)}`;
@@ -176,16 +162,13 @@ export default function Review() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="Reviewer Dashboard">
-            <div className="text-sm text-[var(--color-muted)]">
-              City: <b>{city}</b>
-            </div>
+            <div className="text-sm text-[var(--color-muted)]">City: <b>{city}</b></div>
           </Section>
 
           {!member ? (
             <Section title="Review Queue">{needMember()}</Section>
           ) : (
             <>
-              {/* EVENTS (unchanged from OLD) */}
               <ModuleQueue
                 title="Events — Pending"
                 rows={evRows}
@@ -195,8 +178,6 @@ export default function Review() {
                 onReject={(id)  => { voteEvent(id, reviewerId, false); refresh(); }}
                 getPreviewPath={(q) => `/event/${q.id}`}
               />
-
-              {/* MARKETPLACE (unchanged from OLD) */}
               <ModuleQueue
                 title="Marketplace — Pending"
                 rows={mpRows}
@@ -206,8 +187,6 @@ export default function Review() {
                 onReject={(id)  => { voteListing(id, reviewerId, false); refresh(); }}
                 getPreviewPath={() => "/marketplace"}
               />
-
-              {/* JOBS (unchanged from OLD) */}
               <ModuleQueue
                 title="Jobs — Pending"
                 rows={jobRows}
@@ -217,8 +196,6 @@ export default function Review() {
                 onReject={(id)  => { voteJob(id, reviewerId, false); refresh(); }}
                 getPreviewPath={() => "/jobs"}
               />
-
-              {/* DISCOVER (NEW) */}
               <ModuleQueue
                 title="Discover — Pending"
                 rows={discRows}
@@ -228,8 +205,6 @@ export default function Review() {
                 onReject={(id)  => { voteDiscover(id, reviewerId, false); refresh(); }}
                 getPreviewPath={(q) => `/discover/${q.id}`}
               />
-
-              {/* LOCAL RENTALS (NEW) */}
               <ModuleQueue
                 title="Local Rentals — Pending"
                 rows={rentRows}
@@ -243,12 +218,11 @@ export default function Review() {
           )}
         </div>
 
-        {/* Right rail tip (kept) */}
         <div className="hidden lg:block">
           <div className="rounded-2xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-3">
             <div className="text-sm font-semibold">Tip</div>
             <p className="text-xs text-[var(--color-muted)] mt-1">
-              Approvals happen when ≥80% of registered reviewers for the city/module approve.
+              Approvals are weighted by reviewer reputation. Quorum adapts to active participation.
             </p>
           </div>
         </div>

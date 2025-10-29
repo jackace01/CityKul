@@ -8,7 +8,7 @@ export default function Section({ title, rightHref, rightText, children, classNa
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
         <h2 className="text-base md:text-lg font-semibold tracking-tight">{title}</h2>
         {rightHref && rightText ? (
-          <Link to={rightHref} className="text-sm text-[var(--color-accent)] hover:underline">
+          <Link to={rightHref} className="text-sm hover:underline" style={{ color: 'var(--color-link)' }}>
             {rightText}
           </Link>
         ) : null}

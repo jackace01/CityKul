@@ -1,6 +1,5 @@
 // src/lib/api/discover.js
 // Discover = City directory (seed) + user-submitted places (after decentralised approval).
-// Keeps your existing review-engine integration (80% quorum per city/module).
 
 import {
   submit,
@@ -13,7 +12,7 @@ import {
   quorumNeeded
 } from "../review.js";
 
-// ------- Categories (shared across seed + submissions) -------
+// ------- Categories -------
 export const DISCOVER_CATEGORIES = [
   "Shops & Businesses",
   "Restaurants & Cafés",
@@ -46,6 +45,9 @@ function seedDataFor(city) {
     contact: c.contact || "",
     website: c.website || "",
     media: [],
+    // map coords optional
+    lat: typeof c.lat === "number" ? c.lat : undefined,
+    lng: typeof c.lng === "number" ? c.lng : undefined,
   });
 
   if ((city || "").toLowerCase() === "prayagraj" || (city || "").toLowerCase() === "allahabad") {
@@ -56,7 +58,6 @@ function seedDataFor(city) {
       std({ id: "shop1", name: "City Hardware & Tools", category: "Shops & Businesses", address: "Bazaar Street", locality: "Kareli", contact: "+91-9999990003" }),
     ];
   }
-  // default seed (e.g., Indore)
   return [
     std({ id: "hosp1", name: "Metro Multi-Speciality Hospital", category: "Hospitals & Clinics", address: "Ring Road", locality: "Vijay Nagar", contact: "+91-9999991001" }),
     std({ id: "park1", name: "Greenleaf Park", category: "Parks & Public Places", address: "Sector 3", locality: "Scheme 78" }),
@@ -81,7 +82,7 @@ function listSeed(city) {
 function toShape(rec) {
   const d = rec.data || {};
   return {
-    id: rec.id, // IMPORTANT: reviews key will match this id
+    id: rec.id,
     name: d.name || "Place",
     category: d.category || "Others",
     description: d.description || "",
@@ -93,11 +94,15 @@ function toShape(rec) {
     media: Array.isArray(d.media) ? d.media : [],
     createdAt: rec.createdAt,
     approved: rec.status === "approved",
-    ownerId: d.ownerId || ""
+    ownerId: d.ownerId || "",
+    // NEW: coordinates optional
+    lat: typeof d.lat === "number" ? d.lat : (typeof d.latitude === "number" ? d.latitude : undefined),
+    lng: typeof d.lng === "number" ? d.lng : (typeof d.longitude === "number" ? d.longitude : undefined),
   };
 }
 
 export function submitDiscover(payload) {
+  // payload may include lat/lng
   return submit("discover", payload);
 }
 export function listPendingDiscover(city) {
@@ -126,7 +131,6 @@ export function listDiscoverMerged(cityOpt) {
   const city = cityOpt || localStorage.getItem("citykul:city") || "Indore";
   const seed = listSeed(city);
   const approved = listApprovedDiscover(city);
-  // Discover first (new), then seed; de-dup by id (discover overrides seed if same id is ever used).
   const byId = new Map();
   for (const r of approved) byId.set(r.id, r);
   for (const r of seed) if (!byId.has(r.id)) byId.set(r.id, r);

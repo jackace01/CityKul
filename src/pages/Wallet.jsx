@@ -1,22 +1,35 @@
-import { useEffect, useMemo } from "react";
+// src/pages/Wallet.jsx
+import { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import Section from "../components/Section";
 import { getUser, isMember } from "../lib/auth";
-import { getBalance, getLedger, ensureDemoWallet } from "../lib/api/wallet";
+import { getBalance, getLedger, ensureDemoWallet, deposit, withdraw, getUserHolds } from "../lib/api/wallet";
 import BecomeMemberButton from "../components/BecomeMemberButton";
 
 export default function Wallet() {
   const u = getUser();
-  const uid = u?.email || "guest@demo";
+  const uid = u?.email || u?.name || "guest@demo";
   const member = isMember();
 
-  // Seed demo wallet ONCE per user (prevents reseeding on each render)
   useEffect(() => {
     if (uid) ensureDemoWallet(uid, member);
   }, [uid, member]);
 
-  const balance = useMemo(() => getBalance(uid), [uid]);
-  const ledger = useMemo(() => getLedger(uid), [uid]);
+  const [tick, setTick] = useState(0);
+  const bump = () => setTick(t => t + 1);
+
+  const balance = useMemo(() => getBalance(uid), [uid, tick]);
+  const ledger = useMemo(() => getLedger(uid), [uid, tick]);
+  const holds = useMemo(() => getUserHolds(uid), [uid, tick]);
+
+  function onTopUp() {
+    try { deposit(uid, 100, "Top-up (demo)"); bump(); }
+    catch { alert("Top-up failed"); }
+  }
+  function onWithdraw() {
+    try { withdraw(uid, 50, "Cash-out (demo)"); bump(); }
+    catch (e) { alert(e.message || "Withdraw failed"); }
+  }
 
   return (
     <Layout>
@@ -27,6 +40,11 @@ export default function Wallet() {
             <div className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-4">
               <div className="text-sm text-[var(--color-muted)]">Current Balance</div>
               <div className="text-3xl font-bold mt-1">₹ {Number(balance || 0).toLocaleString()}</div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={onTopUp} className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">+ ₹100 (demo)</button>
+                <button onClick={onWithdraw} className="px-3 py-2 rounded ring-1 ring-[var(--color-border)]">Withdraw ₹50</button>
+              </div>
 
               {!member ? (
                 <div className="mt-3 text-sm">
@@ -77,18 +95,38 @@ export default function Wallet() {
             </div>
           </Section>
 
-          {/* Helpful info */}
-          <Section title="How to Earn More">
-            <ul className="list-disc pl-5 text-sm space-y-1">
-              <li>Post local events, jobs, marketplace deals that get approved.</li>
-              <li>Verify others’ submissions accurately.</li>
-              <li>Keep your posts complete: clear title, timing, photos, and short video.</li>
-              <li>Engage with your city: answer questions, help newcomers.</li>
-            </ul>
-
-            <div className="mt-3 text-sm text-[var(--color-muted)]">
-              Withdrawals are mock-only right now. We’ll wire this to payouts later.
-            </div>
+          {/* Holds */}
+          <Section title="Escrow Holds">
+            {holds?.length ? (
+              <div className="overflow-auto rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-3">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-[var(--color-muted)]">
+                    <tr>
+                      <th className="py-2 pr-3">Order</th>
+                      <th className="py-2 pr-3">Role</th>
+                      <th className="py-2 pr-3">Amount</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2">When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {holds.map((h, i) => (
+                      <tr key={i} className="border-t border-[var(--color-border)]">
+                        <td className="py-2 pr-3">{h.orderId}</td>
+                        <td className="py-2 pr-3">{h.fromId === uid ? "Renter (payer)" : "Owner (payee)"}</td>
+                        <td className="py-2 pr-3">₹ {Number(h.amount || 0).toLocaleString()}</td>
+                        <td className="py-2 pr-3">{h.status}</td>
+                        <td className="py-2">{new Date(h.ts || h.releasedAt || h.refundedAt || Date.now()).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-4 text-sm text-[var(--color-muted)]">
+                No holds yet. Your escrowed bookings will appear here.
+              </div>
+            )}
           </Section>
         </div>
 

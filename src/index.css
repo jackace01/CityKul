@@ -1,3 +1,98 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Import tokens first */
+@import "./styles/tokens.css";
+
+/* Base resets guided by tokens */
+:root, html, body, #root {
+  height: 100%;
+}
+
+html {
+  color-scheme: dark light;
+}
+
+body {
+  background: var(--color-app);
+  color: var(--color-fg);
+  font-feature-settings: "rlig" 1, "calt" 1, "kern" 1, "ss01" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Links consistent with accent */
+a {
+  color: var(--color-accent);
+}
+a:hover { opacity: .9; }
+
+/* Focus styles: visible only when keyboard is used */
+:focus {
+  outline: none;
+}
+.using-keyboard :focus {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* Inputs / textareas defaults */
+input, textarea, select, button {
+  color: var(--color-fg);
+}
+input, textarea, select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Scrollbar (webkit) */
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+/* =========================================================
+   BUTTON VISIBILITY FIX — ONLY buttons (no layout changes)
+   Ensures readable text on purple/outlined buttons even when
+   global <a> color tries to override it.
+   ========================================================= */
+
+/* Accent-filled buttons (anchor or button with bg-[var(--color-accent)]) */
+a.bg-\[var\(--color-accent\)\],
+button.bg-\[var\(--color-accent\)\],
+.bg-\[var\(--color-accent\)\] {
+  /* force readable foreground over accent background */
+  color: var(--btn-on-accent-fg, #ffffff) !important;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(0,0,0,.18);
+}
+
+/* Hover/active keep contrast */
+a.bg-\[var\(--color-accent\)\]:hover,
+button.bg-\[var\(--color-accent\)\]:hover,
+.bg-\[var\(--color-accent\)\]:hover {
+  color: var(--btn-on-accent-fg, #ffffff) !important;
+}
+a.bg-\[var\(--color-accent\)\]:active,
+button.bg-\[var\(--color-accent\)\]:active,
+.bg-\[var\(--color-accent\)\]:active {
+  color: var(--btn-on-accent-fg, #ffffff) !important;
+}
+
+/* Outline/ring buttons (secondary buttons) — keep text readable */
+a.rounded.ring-\[var\(--color-border\)\],
+button.rounded.ring-\[var\(--color-border\)\],
+.rounded.ring-\[var\(--color-border\)\] {
+  color: var(--color-fg) !important;
+  background: var(--color-surface);
+}
+
+/* Small badge chips also stay readable on colored backgrounds */
+.text-\[11px\].rounded-full {
+  color: inherit;
+  font-weight: 600;
+}

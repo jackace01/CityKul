@@ -9,6 +9,7 @@ import {
   DISCOVER_CATEGORIES,
   ensureDiscoverReviewer
 } from "../lib/api/discover.js";
+import { rateLimitSubmission } from "../lib/guardrails.js";
 
 export default function DiscoverForm() {
   const nav = useNavigate();
@@ -43,6 +44,14 @@ export default function DiscoverForm() {
       alert("Please enter at least City and Name.");
       return;
     }
+
+    const rl = rateLimitSubmission("discover", user?.email || user?.name || "user");
+    if (!rl.ok) {
+      const secs = Math.ceil(rl.retryInMs / 1000);
+      alert(`Please wait ${secs}s before submitting another place.`);
+      return;
+    }
+
     submitDiscover({
       ...form,
       ownerId: user?.email || user?.name || "",
@@ -55,6 +64,12 @@ export default function DiscoverForm() {
   return (
     <Layout>
       <Section title="Add New Place (Discover)">
+        {/* Policy / integrity note */}
+        <div className="mb-3 rounded-lg border border-blue-400/40 bg-blue-50/60 dark:bg-blue-900/20 p-3 text-[13px]">
+          Please submit accurate details. We use community reviewers and light anti-manipulation checks.
+          Rapid duplicate entries or coordinated reviews may be throttled.
+        </div>
+
         {!member ? (
           <div className="text-sm">You need to be a member to submit.</div>
         ) : (

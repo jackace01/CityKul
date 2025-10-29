@@ -10,12 +10,31 @@ import {
   getReviewParameters,
   listPlaceReviews,
   addPlaceReview,
-  getPlaceAverages
+  getPlaceAverages,
+  getPlaceDistributions,
+  voteReviewHelpful,
+  getMyHelpfulVote
 } from "../lib/api/discoverReviews.js";
+import { flagDiscoverItem } from "../lib/guardrails.js";
+
+// Map
+import MapPane from "../components/MapPane";
+// Rating bars
+import RatingBars from "../components/RatingBars";
+// NEW: Roles & Badges
+import { getEntityBadges, getUserBadges } from "../lib/roles";
+
+function mapsHref(place) {
+  const hasLatLng = typeof place?.lat === "number" && typeof place?.lng === "number";
+  if (hasLatLng) return `https://www.google.com/maps?q=${place.lat},${place.lng}`;
+  const q = encodeURIComponent([place?.name, place?.address, place?.locality, place?.city].filter(Boolean).join(", "));
+  return `https://www.google.com/maps?q=${q}`;
+}
 
 export default function DiscoverDetail() {
   const { id } = useParams();
   const user = getUser();
+  const uid = user?.email || user?.name || ""; // used for helpful votes
   const city = user?.city || localStorage.getItem("citykul:city") || "Indore";
 
   const place = useMemo(() => getDiscoverItemById(city, id), [city, id]);
@@ -24,9 +43,13 @@ export default function DiscoverDetail() {
   const [text, setText] = useState("");
   const [ratings, setRatings] = useState(params.reduce((m, p) => (m[p] = 4, m), {}));
   const [tick, setTick] = useState(0);
+  const [showMap, setShowMap] = useState(false);
 
   const reviews = useMemo(() => listPlaceReviews(id), [id, tick]);
   const summary = useMemo(() => getPlaceAverages(id), [id, tick]);
+  const dist = useMemo(() => getPlaceDistributions(id), [id, tick]);
+  const flags = place ? flagDiscoverItem(place, city) : { warnings: [], badges: [] };
+  const entityBadges = place ? getEntityBadges("discover", place) : []; // NEW
 
   function setRating(p, v) { setRatings((r) => ({ ...r, [p]: Number(v) })); }
 
@@ -44,6 +67,12 @@ export default function DiscoverDetail() {
     alert("Thanks! Your review has been added.");
   }
 
+  function onVote(reviewId, vote) {
+    if (!uid) { alert("Sign in to vote."); return; }
+    voteReviewHelpful(id, reviewId, uid, vote);
+    setTick(t => t + 1);
+  }
+
   if (!place) {
     return (
       <Layout>
@@ -57,16 +86,70 @@ export default function DiscoverDetail() {
     );
   }
 
+  const hasCoords = typeof place.lat === "number" && typeof place.lng === "number";
+
   return (
     <Layout>
       <Section title={place.name}>
-        <div className="text-xs text-[var(--color-muted)] mb-1">
-          {place.category} · {place.locality || place.city}
+        <div className="flex items-center flex-wrap gap-2 mb-1">
+          <div className="text-xs text-[var(--color-muted)]">
+            {place.category} · {place.locality || place.city}
+          </div>
+          {/* NEW: entity badges near title */}
+          <div className="flex items-center gap-1 ml-auto">
+            {entityBadges.map((b) => (
+              <span key={`ent-${b}`} className="inline-flex items-center px-2 py-[2px] rounded-full text-[11px] ring-1 ring-[var(--color-border)]">
+                {b}
+              </span>
+            ))}
+          </div>
         </div>
+
+        {/* Unusual-activity warning */}
+        {flags.warnings?.length ? (
+          <div className="mb-3 rounded-lg border border-yellow-400/50 bg-yellow-50/60 dark:bg-yellow-900/20 p-3 text-[13px]">
+            <div className="font-medium mb-1">Heads up: review activity looks unusual</div>
+            <ul className="list-disc pl-4 space-y-1">
+              {flags.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        ) : null}
+
         {place.description ? <p className="text-sm">{place.description}</p> : null}
         {place.address ? <p className="text-xs text-[var(--color-muted)] mt-1">{place.address}</p> : null}
 
-        <div className="mt-4 grid md:grid-cols-2 gap-3">
+        {/* Map + Directions */}
+        <div className="mt-3 flex items-center gap-2">
+          {hasCoords ? (
+            <button
+              onClick={() => setShowMap((s) => !s)}
+              className="px-2 py-1 text-xs rounded-full ring-1 ring-[var(--color-border)]"
+              title="Show on map"
+            >
+              {showMap ? "Hide Map" : "Show Map"}
+            </button>
+          ) : null}
+          <a
+            href={mapsHref(place)}
+            target="_blank"
+            rel="noreferrer"
+            className="px-2 py-1 text-xs rounded-full ring-1 ring-[var(--color-border)]"
+          >
+            Directions
+          </a>
+        </div>
+
+        {showMap && hasCoords ? (
+          <div className="mt-3 rounded-xl overflow-hidden">
+            <MapPane
+              markers={[{ id: place.id, name: place.name, lat: place.lat, lng: place.lng }]}
+              fitBoundsPadding={40}
+            />
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid lg:grid-cols-3 gap-3">
+          {/* Left: Averages + Overall distribution */}
           <Card>
             <div className="font-semibold mb-2">Overall Ratings</div>
             {summary?.count ? (
@@ -77,13 +160,31 @@ export default function DiscoverDetail() {
                     <span className="font-medium">{v}/5</span>
                   </div>
                 ))}
-                <div className="text-xs text-[var(--color-muted)]">Based on {summary.count} review(s)</div>
+                <div className="mt-3">
+                  <RatingBars title="Overall distribution" buckets={dist.overall} total={dist.total} compact />
+                </div>
+                <div className="text-xs text-[var(--color-muted)] mt-2">Based on {summary.count} review(s)</div>
               </div>
             ) : (
               <div className="text-sm text-[var(--color-muted)]">No reviews yet.</div>
             )}
           </Card>
 
+          {/* Middle: Per-parameter distributions */}
+          <Card>
+            <div className="font-semibold mb-2">Breakdown by parameter</div>
+            {summary?.count ? (
+              <div className="space-y-3">
+                {Object.keys(dist.params).map((p) => (
+                  <RatingBars key={p} title={p} buckets={dist.params[p]} total={dist.total} compact />
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--color-muted)]">No data yet.</div>
+            )}
+          </Card>
+
+          {/* Right: Add review */}
           <Card>
             <div className="font-semibold mb-2">Add Your Review</div>
             <form onSubmit={onSubmit} className="space-y-3">
@@ -116,25 +217,59 @@ export default function DiscoverDetail() {
           </Card>
         </div>
 
-        {/* Reviews list */}
+        {/* Reviews list with helpful votes and reviewer badges */}
         <div className="mt-4">
           <div className="text-sm font-semibold mb-2">Recent Reviews</div>
           {reviews.length ? (
             <div className="space-y-3">
-              {reviews.map((r) => (
-                <Card key={r.id}>
-                  <div className="text-sm font-medium">{r.userName}</div>
-                  <div className="text-[11px] text-[var(--color-muted)] mb-2">{new Date(r.ts).toLocaleString()}</div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {Object.entries(r.ratings).map(([k, v]) => (
-                      <div key={k} className="flex items-center justify-between">
-                        <span>{k}</span><span className="font-semibold">{v}/5</span>
+              {reviews.map((r) => {
+                const myVote = getMyHelpfulVote(id, r.id, uid); // 1 | -1 | 0
+                const reviewerBadges = getUserBadges(r.userId); // NEW
+                return (
+                  <Card key={r.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-medium">{r.userName}</div>
+                          <div className="flex items-center gap-1">
+                            {reviewerBadges.map((b) => (
+                              <span key={`rb-${r.id}-${b}`} className="inline-flex items-center px-2 py-[1px] rounded-full text-[10px] ring-1 ring-[var(--color-border)]">
+                                {b}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-[var(--color-muted)] mb-2">{new Date(r.ts).toLocaleString()}</div>
                       </div>
-                    ))}
-                  </div>
-                  {r.text ? <p className="text-sm mt-2">{r.text}</p> : null}
-                </Card>
-              ))}
+                      <div className="flex items-center gap-2 text-xs">
+                        <button
+                          onClick={() => onVote(r.id, 1)}
+                          className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === 1 ? "bg-[var(--color-surface)]" : ""}`}
+                          title="Helpful"
+                        >
+                          👍 {r.helpful?.up || 0}
+                        </button>
+                        <button
+                          onClick={() => onVote(r.id, -1)}
+                          className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === -1 ? "bg-[var(--color-surface)]" : ""}`}
+                          title="Not helpful"
+                        >
+                          👎 {r.helpful?.down || 0}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                      {Object.entries(r.ratings).map(([k, v]) => (
+                        <div key={k} className="flex items-center justify-between">
+                          <span>{k}</span><span className="font-semibold">{v}/5</span>
+                        </div>
+                      ))}
+                    </div>
+                    {r.text ? <p className="text-sm mt-2">{r.text}</p> : null}
+                  </Card>
+                );
+              })}
             </div>
           ) : (
             <div className="text-sm text-[var(--color-muted)]">Be the first to review.</div>

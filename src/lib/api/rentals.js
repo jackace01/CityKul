@@ -1,5 +1,5 @@
 // src/lib/api/rentals.js
-// Local Rentals with decentralised review + availability + booking + messaging + wallet hook (safe).
+// Local Rentals with decentralised review + availability + booking + messaging + ESCROW wallet flow (safe).
 
 import {
   submit,
@@ -59,22 +59,12 @@ function appendOverlayBooking(listingId, booking) {
   saveOverlay(all);
 }
 
-/* ------------------------ Wallet hook (safe) ---------------------- */
-/* No top-level await; callers can inject wallet functions. */
-let walletHooks = {
-  addPoints: null,        // (userId, amount, note)
-  transferPoints: null    // (fromId, toId, amount, note)
-};
-export function setWalletHooks(hooks = {}) {
-  walletHooks = {
-    addPoints: typeof hooks.addPoints === "function" ? hooks.addPoints : null,
-    transferPoints: typeof hooks.transferPoints === "function" ? hooks.transferPoints : null
-  };
-}
-// Optional: auto-detect global hooks if provided somewhere else
-if (typeof window !== "undefined" && window.citykulWalletHooks) {
-  setWalletHooks(window.citykulWalletHooks);
-}
+/* ------------------------ Wallet hooks (safe) --------------------- */
+/** We lean on wallet.js but stay graceful if it’s absent. */
+let wallet = null;
+try {
+  wallet = await import("./wallet.js");
+} catch { wallet = null; }
 
 /* ----------------------- Shape mapping helpers -------------------- */
 function toShape(rec) {
@@ -97,13 +87,11 @@ function toShape(rec) {
     availability: Array.isArray(d.availability) ? d.availability : [],
     bookings: Array.isArray(d.bookings) ? d.bookings : []
   };
-  // Merge with overlay so runtime updates are visible immediately
   return mergeOverlay(shaped, shaped.id);
 }
 
 /* --------------------------- Submissions -------------------------- */
 export function submitRental(payload) {
-  // payload: { city, category, title, description, price, pricePer, deposit, address, locality, ownerId, media:[], availability:[] }
   return submit("rentals", payload);
 }
 export function listPendingRentals(city) {
@@ -142,15 +130,12 @@ export function getRentalById(city, id) {
 
 export function isAvailable(listing, start, end) {
   if (!listing) return false;
-  // Always merge current overlay (defensive)
   const merged = mergeOverlay(listing, listing.id);
   const { availability = [], bookings = [] } = merged;
 
-  // start..end must fall fully within at least one declared availability range
   const inRange = availability.some(r => dparse(r.start) <= dparse(start) && dparse(end) <= dparse(r.end));
   if (!inRange) return false;
 
-  // and must not clash with existing bookings
   return !bookings.some(b => overlaps(b.start, b.end, start, end));
 }
 
@@ -162,6 +147,18 @@ export function setAvailability(listingId, ranges = []) {
 const LEDGER_KEY = "citykul:rentals:ledger";
 const ORDERS_KEY = "citykul:rentals:orders";
 const MSG_KEY = (orderId) => `citykul:rentals:messages:${orderId}`;
+
+function loadOrders() { return loadJSON(ORDERS_KEY, []); }
+function saveOrders(arr) { saveJSON(ORDERS_KEY, arr || []); }
+function updateOrder(id, patch) {
+  const all = loadOrders();
+  const i = all.findIndex(o => o.id === id);
+  if (i === -1) return null;
+  const next = { ...all[i], ...patch };
+  all[i] = next;
+  saveOrders(all);
+  return next;
+}
 
 export function createRentalOrder({ listingId, renterId, renterName = "You", start, end }) {
   const city = localStorage.getItem("citykul:city") || "Indore";
@@ -194,28 +191,19 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
     unitPrice: unit,
     deposit: Number(listing.deposit) || 0,
     total,
-    status: "created",
+    status: "created",                 // created -> paid_hold -> accepted -> in_use -> returned -> completed
+    timeline: [{ at: Date.now(), by: renterId, action: "created" }],
     ts: Date.now()
   };
 
-  // persist order
   const orders = loadJSON(ORDERS_KEY, []);
   orders.unshift(order);
   saveJSON(ORDERS_KEY, orders);
 
-  // record booking in overlay (source of truth for clashes)
+  // Reserve slot visually so others see clash while pending
   appendOverlayBooking(listingId, { start, end, renterId, orderId: order.id });
 
-  // wallet hooks (optional & safe)
-  try {
-    if (walletHooks.transferPoints) {
-      walletHooks.transferPoints(renterId, order.ownerId, total, `Rental ${listing.title || "listing"} (${start}–${end})`);
-    } else if (walletHooks.addPoints) {
-      walletHooks.addPoints(order.ownerId, total, `Rental income: ${listing.title || "listing"}`);
-    }
-  } catch { /* ignore wallet failures gracefully */ }
-
-  // ledger entry
+  // ledger note
   const ledger = loadJSON(LEDGER_KEY, []);
   ledger.unshift({
     id: `txn-${Date.now().toString(36)}`,
@@ -234,6 +222,103 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
 
 export function listRentalOrders() {
   return loadJSON(ORDERS_KEY, []);
+}
+
+/* --------------------------- Escrow Flow --------------------------- */
+/** payForOrder: renter pays; funds held in escrow */
+export function payForOrder(orderId, renterId) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (o.renterId !== renterId) throw new Error("Only renter can pay");
+  if (o.status !== "created") throw new Error("Order not payable");
+  if (!wallet?.createHold) throw new Error("Wallet not available");
+
+  wallet.createHold(orderId, renterId, o.total, `Escrow for rental ${o.listingId}`);
+  const next = updateOrder(orderId, {
+    status: "paid_hold",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: renterId, action: "paid_hold" }]
+  });
+  return next;
+}
+
+/** acceptOrder: owner accepts booking */
+export function acceptOrder(orderId, ownerId) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (o.ownerId !== ownerId) throw new Error("Only owner can accept");
+  if (o.status !== "paid_hold") throw new Error("Order not in paid state");
+  return updateOrder(orderId, {
+    status: "accepted",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: ownerId, action: "accepted" }]
+  });
+}
+
+/** markHandedOver: owner hands item to renter */
+export function markHandedOver(orderId, ownerId) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (o.ownerId !== ownerId) throw new Error("Only owner can mark handover");
+  if (o.status !== "accepted") throw new Error("Order not accepted");
+  return updateOrder(orderId, {
+    status: "in_use",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: ownerId, action: "handed_over" }]
+  });
+}
+
+/** markReturned: renter marks the item returned */
+export function markReturned(orderId, renterId) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (o.renterId !== renterId) throw new Error("Only renter can mark returned");
+  if (o.status !== "in_use") throw new Error("Order not in-use");
+  return updateOrder(orderId, {
+    status: "returned",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: renterId, action: "returned" }]
+  });
+}
+
+/** releaseEscrow: owner releases escrow after return (pays owner) */
+export function releaseEscrow(orderId, ownerId) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (o.ownerId !== ownerId) throw new Error("Only owner can release");
+  if (!["returned", "accepted"].includes(o.status)) throw new Error("Order not releasable");
+  if (!wallet?.releaseHold) throw new Error("Wallet not available");
+
+  wallet.releaseHold(orderId, ownerId);
+  return updateOrder(orderId, {
+    status: "completed",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: ownerId, action: "released" }]
+  });
+}
+
+/** cancelOrder: before accept -> refund hold if paid */
+export function cancelOrder(orderId, byUser) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (!["created", "paid_hold"].includes(o.status)) throw new Error("Order not cancelable now");
+
+  if (o.status === "paid_hold" && wallet?.refundHold) {
+    wallet.refundHold(orderId);
+  }
+
+  return updateOrder(orderId, {
+    status: "canceled",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: byUser, action: "canceled" }]
+  });
+}
+
+/** openDispute: either party can dispute while paid/accepted/in_use/returned */
+export function openDispute(orderId, byUser) {
+  const o = listRentalOrders().find(x => x.id === orderId);
+  if (!o) throw new Error("Order not found");
+  if (!["paid_hold", "accepted", "in_use", "returned"].includes(o.status)) {
+    throw new Error("Order not disputable now");
+  }
+  return updateOrder(orderId, {
+    status: "disputed",
+    timeline: [...(o.timeline || []), { at: Date.now(), by: byUser, action: "disputed" }]
+  });
 }
 
 /* --------------------------- Messaging ---------------------------- */

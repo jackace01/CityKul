@@ -10,6 +10,7 @@ import {
   RENTAL_CATEGORIES,
   setAvailability
 } from "../lib/api/rentals";
+import { rateLimitSubmission } from "../lib/guardrails.js";
 
 export default function RentalForm() {
   const user = getUser();
@@ -55,6 +56,14 @@ export default function RentalForm() {
       alert("Become a member to submit rentals.");
       return;
     }
+
+    const rl = rateLimitSubmission("rentals", user?.email || user?.name || "user");
+    if (!rl.ok) {
+      const secs = Math.ceil(rl.retryInMs / 1000);
+      alert(`Please wait ${secs}s before submitting another rental.`);
+      return;
+    }
+
     const city = user?.city || localStorage.getItem("citykul:city") || "Indore";
     const payload = {
       city,
@@ -91,6 +100,12 @@ export default function RentalForm() {
   return (
     <Layout>
       <Section title="Post a Local Rental">
+        {/* Integrity note */}
+        <div className="mb-3 rounded-lg border border-blue-400/40 bg-blue-50/60 dark:bg-blue-900/20 p-3 text-[13px]">
+          Please submit accurate details. Rapid duplicate listings or suspicious activity may be throttled.
+          Bookings and messages happen inside CityKul for safety.
+        </div>
+
         {!member ? (
           <div className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-4">
             <div className="text-sm">Become a member to post rentals.</div>
