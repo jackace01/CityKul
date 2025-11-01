@@ -6,6 +6,9 @@ import { useUploader } from "../hooks/useUploader";
 import { addEvent } from "../lib/api/events";
 import { addNotification } from "../lib/api/notifications";
 import BecomeMemberButton from "../components/BecomeMemberButton";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
+import { getSelectedCity } from "../lib/cityState";
 
 export default function SubmitEvent() {
   const u = getUser();
@@ -22,8 +25,7 @@ export default function SubmitEvent() {
   const [description, setDescription] = useState("");
   const { items: media, add: addMedia } = useUploader();
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmit() {
     const cat = (customCategory || "").trim() || category;
 
     const evt = {
@@ -33,20 +35,18 @@ export default function SubmitEvent() {
       date,
       time,
       fee,
-      place,              // venue / place
-      address,            // detailed address
+      place,
+      address,
       description,
       media,
-      city: u?.city || "",
+      city: getSelectedCity() || u?.city || "",
       locality: u?.locality || "",
       createdBy: u?.name || u?.id || "Organizer",
-      ownerId: u?.email || "guest@demo", // used for notifications & rewards
+      ownerId: u?.email || "guest@demo",
       createdAt: Date.now(),
     };
 
     addEvent(evt);
-
-    // Notify creator that it’s pending review (mock)
     addNotification({
       toUserId: u?.email || "guest@demo",
       title: "Event submitted for review",
@@ -68,7 +68,7 @@ export default function SubmitEvent() {
             </div>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="space-y-4 max-w-lg mx-auto">
+          <form onSubmit={(e)=>e.preventDefault()} className="space-y-4 max-w-lg mx-auto">
             <div className="text-xs text-[var(--color-muted)]">
               Posting as <b>{u?.name || "Organizer"}</b>
               {u?.city ? ` · ${u.city}${u?.locality ? " - " + u.locality : ""}` : ""}
@@ -188,9 +188,11 @@ export default function SubmitEvent() {
             </div>
 
             <div className="text-right">
-              <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">
-                Submit for Review
-              </button>
+              <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+                <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">
+                  Submit for Review
+                </button>
+              </ProtectedAction>
             </div>
           </form>
         )}

@@ -3,6 +3,8 @@ import Section from "../components/Section";
 import { getUser, isMember } from "../lib/auth";
 import { useState } from "react";
 import BecomeMemberButton from "../components/BecomeMemberButton";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
 
 export default function SubmitDeal() {
   const member = isMember();
@@ -15,8 +17,7 @@ export default function SubmitDeal() {
   const [price, setPrice] = useState("");
   const [delivery, setDelivery] = useState("Pickup");
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmit() {
     alert(
       "Submitted for review! (mock)\n\n" +
         JSON.stringify(
@@ -45,7 +46,7 @@ export default function SubmitDeal() {
             You need to be a member to submit promotions. <BecomeMemberButton />
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="max-w-lg mx-auto space-y-3">
+          <form onSubmit={(e)=>e.preventDefault()} className="max-w-lg mx-auto space-y-3">
             <div className="text-xs text-[var(--color-muted)]">
               Posting as <b>{u?.name}</b>
             </div>
@@ -107,7 +108,9 @@ export default function SubmitDeal() {
             </div>
 
             <div className="text-right">
-              <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">Submit</button>
+              <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+                <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">Submit</button>
+              </ProtectedAction>
             </div>
           </form>
         )}

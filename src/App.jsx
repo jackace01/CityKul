@@ -1,6 +1,9 @@
 // src/App.jsx
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+
+// Chat provider must wrap everything that uses useChat()
+import { ChatProvider } from "./components/ChatProvider";
 
 // Public pages
 import Splash from "./pages/Splash";
@@ -44,13 +47,28 @@ import RentalList from "./pages/RentalList";
 import RentalForm from "./pages/RentalForm";
 import RentalDetail from "./pages/RentalDetail";
 
-// Discover pages (USE YOUR EXISTING FILES)
+// Discover pages (existing)
 import DiscoverList from "./pages/DiscoverList";
 import DiscoverForm from "./pages/DiscoverForm";
 import DiscoverDetail from "./pages/DiscoverDetail";
 
-// Chat provider
-import { ChatProvider } from "./components/ChatProvider";
+// NEW: Contests
+import Contests from "./pages/Contests";
+import SubmitContestEntry from "./pages/SubmitContestEntry";
+import ContestDetail from "./pages/ContestDetail";
+
+// NEW: City Hero
+import CityHero from "./pages/CityHero";
+import CityHeroLegacy from "./pages/CityHeroLegacy";
+
+// NEW: Admin Finance (Platform Wallet)
+import AdminFinance from "./pages/AdminFinance";
+
+// NEW: Admin Hub
+import AdminHub from "./pages/AdminHub";
+
+// NEW: Admin Config (Per-city knobs)
+import AdminConfig from "./pages/AdminConfig";
 
 // Optional: smart fallback
 import { getUser } from "./lib/auth";
@@ -61,8 +79,8 @@ function SmartFallback() {
 
 export default function App() {
   return (
-    <Router>
-      <ChatProvider>
+    <ChatProvider>
+      <Router>
         <Routes>
           {/* Public */}
           <Route path="/" element={<Splash />} />
@@ -100,21 +118,47 @@ export default function App() {
           <Route path="/rentals/new" element={<RentalForm />} />
           <Route path="/rentals/:id" element={<RentalDetail />} />
 
-          {/* Discover (YOUR existing files) */}
+          {/* Discover */}
           <Route path="/discover" element={<DiscoverList />} />
           <Route path="/discover/new" element={<DiscoverForm />} />
           <Route path="/discover/:id" element={<DiscoverDetail />} />
 
-          {/* Submit forms (existing) */}
+          {/* NEW: Contests */}
+          <Route path="/contests" element={<Contests />} />
+          <Route path="/contests/new" element={<SubmitContestEntry />} />
+          <Route path="/contests/:id" element={<ContestDetail />} />
+
+          {/* NEW: City Hero */}
+          <Route path="/city-hero" element={<CityHero />} />
+          <Route path="/city-hero/legacy" element={<CityHeroLegacy />} />
+
+          {/* NEW: Admin Finance (Platform Wallet) */}
+          <Route path="/admin/finance" element={<AdminFinance />} />
+
+          {/* NEW: Admin Hub */}
+          <Route path="/admin" element={<AdminHub />} />
+
+          {/* NEW: Admin Config (Per-city knobs) */}
+          <Route path="/admin/config" element={<AdminConfig />} />
+
+          {/* Legacy redirects (singular -> plural) */}
+          <Route path="/contest" element={<Navigate to="/contests" replace />} />
+          <Route path="/contest/new" element={<Navigate to="/contests/new" replace />} />
+          <Route path="/contest/*" element={<Navigate to="/contests" replace />} />
+
+          {/* Submit forms */}
           <Route path="/submit-event" element={<SubmitEvent />} />
           <Route path="/submit-job" element={<SubmitJob />} />
           <Route path="/submit-deal" element={<SubmitDeal />} />
           <Route path="/submit-post" element={<SubmitPost />} />
 
+          {/* Legacy redirects */}
+          <Route path="/wallet/ledger" element={<Navigate to="/wallet" replace />} />
+
           {/* Fallback */}
           <Route path="*" element={<SmartFallback />} />
         </Routes>
-      </ChatProvider>
-    </Router>
+      </Router>
+    </ChatProvider>
   );
 }

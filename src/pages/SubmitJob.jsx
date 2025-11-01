@@ -2,10 +2,17 @@ import Layout from "../components/Layout";
 import Section from "../components/Section";
 import { isMember, getUser } from "../lib/auth";
 import BecomeMemberButton from "../components/BecomeMemberButton";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
 
 export default function SubmitJob() {
   const member = isMember();
   const u = getUser();
+
+  function doSubmit() {
+    alert("Submitted for review (mock).");
+  }
+
   return (
     <Layout>
       <Section title="Submit Job">
@@ -43,9 +50,11 @@ export default function SubmitJob() {
               className="rounded px-3 py-2 border border-[var(--color-border)] bg-white dark:bg-gray-900"
               placeholder="Job description"
             ></textarea>
-            <button className="mt-2 px-4 py-2 rounded bg-[var(--color-accent)] text-white">
-              Submit for review (mock)
-            </button>
+            <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+              <button className="mt-2 px-4 py-2 rounded bg-[var(--color-accent)] text-white">
+                Submit for review (mock)
+              </button>
+            </ProtectedAction>
           </div>
         )}
       </Section>

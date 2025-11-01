@@ -1,5 +1,5 @@
-// src/lib/review.js 
-// Reputation-weighted review engine with dynamic quorum.
+// src/lib/review.js
+// Reputation-weighted review engine with dynamic quorum + moderation log.
 // Backward-compatible API for submissions/lists/votes used across modules.
 //
 // Exposed API (unchanged where possible):
@@ -11,9 +11,11 @@
 // - vote(mod, submissionId, reviewerId, approve)
 // - tryFinalize(mod, submissionId) -> updated record | null
 //
-// NEW (optional) helpers (no breakage if unused):
+// NEW (optional) helpers:
 // - getReputation(city, mod, reviewerId)
 // - quorumInfo(city, mod) -> { totalReviewers, targetPercent, neededWeight, totalWeight, windowDays, activeRate }
+// - getVotesBox(submissionId)
+// - listModerationLog(filters), clearModerationLog()
 
 import { loadJSON, saveJSON } from "./storage.js";
 
@@ -25,6 +27,9 @@ const PENDING_KEY = (city, mod) => `citykul:${mod}:pending:${city}`;
 const APPROVED_KEY = (city, mod) => `citykul:${mod}:approved:${city}`;
 const REJECTED_KEY = (city, mod) => `citykul:${mod}:rejected:${city}`;
 const VOTE_KEY = (id) => `citykul:votes:${id}`;
+
+// NEW: moderation log (global)
+const MODLOG_KEY = "citykul:modlog";
 
 // NEW: per city+module reputation + activity
 const REPUTATION_KEY = (city, mod) => `citykul:rep:${city}:${mod}`;          // { reviewerId: rep(0.2..1.0) }
@@ -47,8 +52,6 @@ const TARGET_MAX = 0.80;
 // util
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function now() { return Date.now(); }
-function days(ms) { return ms / (1000 * 60 * 60 * 24); }
-
 function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
 }
@@ -263,6 +266,32 @@ function moveBetweenBuckets(rec, fromKey, toKey, status) {
   return updated;
 }
 
+/* ============================ Moderation log ============================ */
+
+function _pushModLog(entry) {
+  const arr = loadJSON(MODLOG_KEY, []);
+  arr.unshift(entry);
+  const capped = arr.slice(0, 2000); // keep last 2000 entries
+  saveJSON(MODLOG_KEY, capped);
+}
+
+export function listModerationLog(filters = {}) {
+  const { city, module, fromTs, toTs, limit = 500 } = filters || {};
+  let rows = loadJSON(MODLOG_KEY, []);
+  if (city)   rows = rows.filter(r => (r.city || "").toLowerCase() === String(city).toLowerCase());
+  if (module && module !== "all") rows = rows.filter(r => r.module === module);
+  if (fromTs) rows = rows.filter(r => r.ts >= fromTs);
+  if (toTs)   rows = rows.filter(r => r.ts <= toTs);
+  rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return rows.slice(0, limit);
+}
+
+export function clearModerationLog() {
+  saveJSON(MODLOG_KEY, []);
+}
+
+/* ============================ Finalization ============================ */
+
 export function tryFinalize(mod, submissionId) {
   const rec = getSubmissionById(mod, submissionId);
   if (!rec || rec.status !== "pending") return null;
@@ -280,25 +309,47 @@ export function tryFinalize(mod, submissionId) {
   const targetPercent = _targetPercent(city, module);
   const neededWeight = totalWeight * targetPercent;
 
+  function logDecision(updated, outcome) {
+    _pushModLog({
+      id: rec.id,
+      module,
+      city,
+      category: rec.category || "General",
+      status: outcome,      // "approved" | "rejected"
+      ts: Date.now(),
+      quorum: {
+        targetPercent: Number(targetPercent.toFixed(2)),
+        neededWeight: Number(neededWeight.toFixed(2)),
+        totalWeight: Number(totalWeight.toFixed(2)),
+      },
+      votes: {
+        approvals: approvals.length,
+        rejections: rejections.length,
+        approvalWeight: Number(approvalWeight.toFixed(2)),
+        rejectionWeight: Number(rejectionWeight.toFixed(2)),
+      },
+    });
+    return updated;
+  }
+
   // finalize when either side reaches neededWeight
   if (approvalWeight >= neededWeight) {
     const updated = moveBetweenBuckets(rec, PENDING_KEY, APPROVED_KEY, "approved");
-    // update agreement + rep for participants
     approvals.forEach((rid) => _recordAgreement(city, module, rid, true));
     rejections.forEach((rid) => _recordAgreement(city, module, rid, false));
-    return updated;
+    return logDecision(updated, "approved");
   }
   if (rejectionWeight >= neededWeight) {
     const updated = moveBetweenBuckets(rec, PENDING_KEY, REJECTED_KEY, "rejected");
     approvals.forEach((rid) => _recordAgreement(city, module, rid, false));
     rejections.forEach((rid) => _recordAgreement(city, module, rid, true));
-    return updated;
+    return logDecision(updated, "rejected");
   }
 
   return null; // still pending
 }
 
-/* ============================ NEW: read-only votes box ============================ */
+/* ============================ Read-only votes box ============================ */
 // For guardrails/anomaly banners (does NOT expose identities publicly in UI)
 export function getVotesBox(submissionId) {
   const box = loadJSON(VOTE_KEY(submissionId), { approvals: [], rejections: [] });

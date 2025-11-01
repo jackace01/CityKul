@@ -11,6 +11,9 @@ import {
   setAvailability
 } from "../lib/api/rentals";
 import { rateLimitSubmission } from "../lib/guardrails.js";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
+import { getSelectedCity } from "../lib/cityState";
 
 export default function RentalForm() {
   const user = getUser();
@@ -50,8 +53,7 @@ export default function RentalForm() {
     setAvail((a) => a.filter((_, i) => i !== idx));
   }
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmit() {
     if (!member) {
       alert("Become a member to submit rentals.");
       return;
@@ -64,7 +66,7 @@ export default function RentalForm() {
       return;
     }
 
-    const city = user?.city || localStorage.getItem("citykul:city") || "Indore";
+    const city = getSelectedCity() || user?.city || "Indore";
     const payload = {
       city,
       category,
@@ -80,12 +82,11 @@ export default function RentalForm() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      availability: avail // submit availability with the listing
+      availability: avail
     };
 
     try {
-      const rec = submitRental(payload); // goes to decentralised review queue
-      // Also write availability to overlay immediately (so it’s present by listing id)
+      const rec = submitRental(payload);
       if (rec?.id && avail.length) {
         setAvailability(rec.id, avail);
       }
@@ -100,14 +101,13 @@ export default function RentalForm() {
   return (
     <Layout>
       <Section title="Post a Local Rental">
-        {/* Integrity note */}
         <div className="mb-3 rounded-lg border border-blue-400/40 bg-blue-50/60 dark:bg-blue-900/20 p-3 text-[13px]">
           Please submit accurate details. Rapid duplicate listings or suspicious activity may be throttled.
           Bookings and messages happen inside CityKul for safety.
         </div>
 
         {!member ? (
-          <div className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-4">
+          <div className="rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] p-4 text-sm">
             <div className="text-sm">Become a member to post rentals.</div>
             <Link to="/membership" className="mt-2 inline-block px-3 py-1 rounded ring-1 ring-[var(--color-border)]">
               Become a member
@@ -115,7 +115,7 @@ export default function RentalForm() {
           </div>
         ) : (
           <Card>
-            <form onSubmit={onSubmit} className="space-y-4">
+            <form onSubmit={(e)=>e.preventDefault()} className="space-y-4">
               {/* Basic details */}
               <div className="grid md:grid-cols-2 gap-3">
                 <label className="text-sm">
@@ -264,7 +264,9 @@ export default function RentalForm() {
               </div>
 
               <div className="flex items-center gap-2">
-                <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit for review</button>
+                <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+                  <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit for review</button>
+                </ProtectedAction>
                 <Link to="/rentals" className="px-3 py-2 rounded ring-1 ring-[var(--color-border)]">Cancel</Link>
               </div>
             </form>

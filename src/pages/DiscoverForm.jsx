@@ -10,6 +10,9 @@ import {
   ensureDiscoverReviewer
 } from "../lib/api/discover.js";
 import { rateLimitSubmission } from "../lib/guardrails.js";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
+import { getSelectedCity } from "../lib/cityState";
 
 export default function DiscoverForm() {
   const nav = useNavigate();
@@ -25,7 +28,7 @@ export default function DiscoverForm() {
     description: "",
     address: "",
     locality: user?.locality || "",
-    city: user?.city || "",
+    city: getSelectedCity() || user?.city || "",
     contact: "",
     website: "",
   });
@@ -34,8 +37,7 @@ export default function DiscoverForm() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmit() {
     if (!member) {
       alert("Become a member to submit.");
       return;
@@ -44,14 +46,12 @@ export default function DiscoverForm() {
       alert("Please enter at least City and Name.");
       return;
     }
-
     const rl = rateLimitSubmission("discover", user?.email || user?.name || "user");
     if (!rl.ok) {
       const secs = Math.ceil(rl.retryInMs / 1000);
       alert(`Please wait ${secs}s before submitting another place.`);
       return;
     }
-
     submitDiscover({
       ...form,
       ownerId: user?.email || user?.name || "",
@@ -64,7 +64,6 @@ export default function DiscoverForm() {
   return (
     <Layout>
       <Section title="Add New Place (Discover)">
-        {/* Policy / integrity note */}
         <div className="mb-3 rounded-lg border border-blue-400/40 bg-blue-50/60 dark:bg-blue-900/20 p-3 text-[13px]">
           Please submit accurate details. We use community reviewers and light anti-manipulation checks.
           Rapid duplicate entries or coordinated reviews may be throttled.
@@ -73,7 +72,7 @@ export default function DiscoverForm() {
         {!member ? (
           <div className="text-sm">You need to be a member to submit.</div>
         ) : (
-          <form onSubmit={onSubmit} className="grid gap-3 max-w-2xl">
+          <form onSubmit={(e)=>e.preventDefault()} className="grid gap-3 max-w-2xl">
             <div>
               <div className="text-sm mb-1">Category</div>
               <div className="flex flex-wrap gap-2">
@@ -165,7 +164,9 @@ export default function DiscoverForm() {
             </div>
 
             <div className="pt-2">
-              <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">Submit</button>
+              <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+                <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">Submit</button>
+              </ProtectedAction>
             </div>
           </form>
         )}

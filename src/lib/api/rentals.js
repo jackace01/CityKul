@@ -12,6 +12,8 @@ import {
   quorumNeeded
 } from "../review.js";
 
+import { computeRentalFees } from "../fees.js";
+
 /* --------------------------- Categories --------------------------- */
 export const RENTAL_CATEGORIES = [
   "Real Estate",
@@ -60,7 +62,6 @@ function appendOverlayBooking(listingId, booking) {
 }
 
 /* ------------------------ Wallet hooks (safe) --------------------- */
-/** We lean on wallet.js but stay graceful if it’s absent. */
 let wallet = null;
 try {
   wallet = await import("./wallet.js");
@@ -177,7 +178,9 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
   else if (listing.pricePer === "week") rent = unit * Math.max(1, Math.ceil(days / 7));
   else rent = unit * days;
 
-  const total = rent + (Number(listing.deposit) || 0);
+  const deposit = Number(listing.deposit) || 0;
+  const totalEscrow = rent + deposit; // escrow amount ONLY (unchanged)
+  const fee = computeRentalFees({ rent, deposit }); // payer-borne
 
   const order = {
     id: `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -189,8 +192,14 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
     start, end, days,
     pricePer: listing.pricePer,
     unitPrice: unit,
-    deposit: Number(listing.deposit) || 0,
-    total,
+    rent,
+    deposit,
+    total: totalEscrow, // we keep "total" = escrow amount for compatibility
+    feeSummary: {
+      platformFee: fee.platformFee,
+      fixedFee: fee.fixedFee,
+      totalFee: fee.totalFee
+    },
     status: "created",                 // created -> paid_hold -> accepted -> in_use -> returned -> completed
     timeline: [{ at: Date.now(), by: renterId, action: "created" }],
     ts: Date.now()
@@ -203,7 +212,7 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
   // Reserve slot visually so others see clash while pending
   appendOverlayBooking(listingId, { start, end, renterId, orderId: order.id });
 
-  // ledger note
+  // ledger note (local diagnostics)
   const ledger = loadJSON(LEDGER_KEY, []);
   ledger.unshift({
     id: `txn-${Date.now().toString(36)}`,
@@ -212,7 +221,7 @@ export function createRentalOrder({ listingId, renterId, renterName = "You", sta
     listingId,
     renterId,
     ownerId: order.ownerId,
-    total,
+    total: totalEscrow,
     ts: Date.now()
   });
   saveJSON(LEDGER_KEY, ledger);
@@ -225,7 +234,7 @@ export function listRentalOrders() {
 }
 
 /* --------------------------- Escrow Flow --------------------------- */
-/** payForOrder: renter pays; funds held in escrow */
+/** payForOrder: renter pays escrow (hold) AND pays fees immediately (payer-borne). */
 export function payForOrder(orderId, renterId) {
   const o = listRentalOrders().find(x => x.id === orderId);
   if (!o) throw new Error("Order not found");
@@ -233,7 +242,16 @@ export function payForOrder(orderId, renterId) {
   if (o.status !== "created") throw new Error("Order not payable");
   if (!wallet?.createHold) throw new Error("Wallet not available");
 
+  // 1) Create escrow hold for rent+deposit (unchanged legacy)
   wallet.createHold(orderId, renterId, o.total, `Escrow for rental ${o.listingId}`);
+
+  // 2) Collect fees from payer up-front (outside escrow)
+  const fee = computeRentalFees({ rent: o.rent || 0, deposit: o.deposit || 0 });
+  const platformId = "platform@citykul";
+  if (wallet?.transfer && fee.totalFee > 0) {
+    wallet.transfer(renterId, platformId, fee.totalFee, `Platform & booking fee for ${orderId}`);
+  }
+
   const next = updateOrder(orderId, {
     status: "paid_hold",
     timeline: [...(o.timeline || []), { at: Date.now(), by: renterId, action: "paid_hold" }]
@@ -292,7 +310,7 @@ export function releaseEscrow(orderId, ownerId) {
   });
 }
 
-/** cancelOrder: before accept -> refund hold if paid */
+/** cancelOrder: before accept -> refund hold if paid (fees remain payer-borne, non-refundable) */
 export function cancelOrder(orderId, byUser) {
   const o = listRentalOrders().find(x => x.id === orderId);
   if (!o) throw new Error("Order not found");

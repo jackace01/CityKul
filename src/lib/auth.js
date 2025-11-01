@@ -24,9 +24,18 @@ export function getUser() {
   return loadJSON(KEY_USER, null);
 }
 export function setUser(u) {
-  saveJSON(KEY_USER, u || null);
-  if (u?.city) localStorage.setItem(KEY_CITY, u.city);
-  if (u?.locality !== undefined) localStorage.setItem(KEY_LOCALITY, u.locality || "");
+  // Ensure homeCity is preserved (fixed at signup), default to existing city if missing
+  const prev = getUser();
+  const next = {
+    ...prev,
+    ...u,
+  };
+  if (!next.homeCity) {
+    next.homeCity = next.homeCity || prev?.homeCity || next.city || "";
+  }
+  saveJSON(KEY_USER, next || null);
+  if (next?.city) localStorage.setItem(KEY_CITY, next.city);
+  if (next?.locality !== undefined) localStorage.setItem(KEY_LOCALITY, next.locality || "");
   emitUserChange();
 }
 
@@ -69,11 +78,14 @@ export function getLocality() {
 
 // ---------- demo helpers ----------
 export function demoSignIn(partial = {}) {
+  const nowCity = partial.city || "Indore";
   const user = {
     name: partial.name || "Citizen",
     email: partial.email || `user-${Date.now()}@demo.local`,
     phone: partial.phone || "",
-    city: partial.city || "Indore",
+    // Both set on first sign-in; homeCity is the residency anchor.
+    homeCity: partial.homeCity || nowCity,
+    city: nowCity,
     locality: partial.locality || "Vijay Nagar",
     profession: partial.profession || "",
     member: !!partial.member,

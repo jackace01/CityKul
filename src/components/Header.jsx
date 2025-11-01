@@ -1,9 +1,12 @@
+// src/components/Header.jsx
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
 import { getUser, isMember, signOut, subscribeUser } from "../lib/auth";
 import { useChat } from "./ChatProvider";
 import CitySwitcher from "./CitySwitcher";
+import { getSelectedCity, getSelectedLocality, subscribeSelectedCity } from "../lib/cityState";
+import { getActive } from "../lib/subscriptions";
 
 export default function Header() {
   const location = useLocation();
@@ -13,9 +16,16 @@ export default function Header() {
   const member = isMember();
   const [showCitySwitcher, setShowCitySwitcher] = useState(false);
 
+  const [selCity, setSelCity] = useState(getSelectedCity());
+  const [selLoc, setSelLoc] = useState(getSelectedLocality());
+
   useEffect(() => {
     const unsub = subscribeUser(setU);
-    return unsub;
+    const unsub2 = subscribeSelectedCity(({ city, locality }) => {
+      setSelCity(city);
+      setSelLoc(locality);
+    });
+    return () => { unsub(); unsub2(); };
   }, []);
 
   const navItems = [
@@ -26,6 +36,7 @@ export default function Header() {
     { name: "Marketplace", path: "/marketplace" },
     { name: "Needs", path: "/needsattention" },
     { name: "Promotions", path: "/promotions" },
+    { name: "Contests", path: "/contests" }, // NEW
     { name: "Wallet", path: "/wallet" },
     { name: "Review", path: "/review" },
     { name: "Friends", path: "/friends" },
@@ -43,6 +54,12 @@ export default function Header() {
       return;
     }
   };
+
+  const home = u?.homeCity || u?.city || "";
+  const explorer = home && selCity && home !== selCity;
+
+  const active = getActive(u);
+  const planLabel = active ? (u?.memberPlan === "business" ? "Business" : "Member") : null;
 
   return (
     <>
@@ -77,7 +94,7 @@ export default function Header() {
 
           {/* Right: Quick actions */}
           <div className="flex items-center gap-3">
-            {/* City switch is now a clear button */}
+            {/* City switch */}
             <button
               type="button"
               onClick={() => setShowCitySwitcher(true)}
@@ -87,8 +104,11 @@ export default function Header() {
             >
               <span>📍</span>
               <span className="hidden sm:inline">
-                {u?.city ? `${u.city}${u?.locality ? " · " + u.locality : ""}` : "Set City"}
+                {selCity ? `${selCity}${selLoc ? " · " + selLoc : ""}` : "Set City"}
               </span>
+              {explorer ? (
+                <span className="ml-1 text-[10px] px-1 py-[1px] rounded bg-amber-500 text-white">Explorer</span>
+              ) : null}
             </button>
 
             <button
@@ -104,15 +124,17 @@ export default function Header() {
                 {u?.name || "Guest"}
                 {member && (
                   <span
-                    title="Member"
-                    className="inline-block text-[10px] px-1 py-[1px] rounded bg-blue-600 text-white"
+                    title={planLabel ? `${planLabel} — expires ${active ? new Date(active.until).toLocaleDateString() : ""}` : "Member"}
+                    className={`inline-block text-[10px] px-1 py-[1px] rounded ${
+                      u?.memberPlan === "business" ? "bg-purple-600 text-white" : "bg-blue-600 text-white"
+                    }`}
                   >
-                    ✓
+                    {u?.memberPlan === "business" ? "★" : "✓"}
                   </span>
                 )}
               </div>
               <div className="text-[11px] text-[var(--color-muted)]">
-                {u?.city ? `${u.city}${u?.locality ? " - " + u.locality : ""}` : "Set your city"}
+                {selCity ? `${selCity}${selLoc ? " - " + selLoc : ""}` : "Set your city"}
               </div>
             </div>
 

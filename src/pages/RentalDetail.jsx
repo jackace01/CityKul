@@ -22,13 +22,13 @@ import {
   cancelOrder,
   openDispute
 } from "../lib/api/rentals";
-import { getBalance, deposit } from "../lib/api/wallet";
+import { getBalance } from "../lib/api/wallet";
 import { flagRentalItem } from "../lib/guardrails.js";
 
-// Map pane on detail (from Sprint 4)
+// Map pane on detail
 import MapPane from "../components/MapPane";
 
-// NEW: Rental reviews API (Sprint 5)
+// Reviews
 import {
   getRentalReviewParameters,
   listRentalReviews,
@@ -39,8 +39,16 @@ import {
   getMyRentalHelpfulVote
 } from "../lib/api/rentalReviews";
 
-// NEW: Roles & Badges
+// Roles & Badges
 import { getEntityBadges, getUserBadges } from "../lib/roles";
+
+// Action-level guard
+import ProtectedAction from "../components/ProtectedAction";
+import { canReviewOrVote } from "../lib/gate";
+
+// Fees UI
+import FeeBreakdown from "../components/FeeBreakdown";
+import { computeRentalFees } from "../lib/fees";
 
 function mapsHref(listing) {
   const has = typeof listing?.lat === "number" && typeof listing?.lng === "number";
@@ -54,11 +62,7 @@ function Bar({ value = 0, total = 0 }) {
   const pct = total ? Math.round((value / total) * 100) : 0;
   return (
     <div className="flex-1 h-2 rounded bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] overflow-hidden">
-      <div
-        className="h-2"
-        style={{ width: `${pct}%`, background: "var(--color-accent)" }}
-        aria-hidden
-      />
+      <div className="h-2" style={{ width: `${pct}%`, background: "var(--color-accent)" }} aria-hidden />
     </div>
   );
 }
@@ -78,15 +82,20 @@ export default function RentalDetail() {
   const [msgText, setMsgText] = useState("");
   const [tick, setTick] = useState(0);
   const [showMap, setShowMap] = useState(false);
-  const bump = () => setTick(t => t + 1);
+  const bump = () => setTick((t) => t + 1);
 
   const allOrders = useMemo(() => listRentalOrders(), [tick]);
   const myOrders = useMemo(() => {
     const me = uid;
-    return allOrders.filter(o => o.listingId === id && (o.renterId === me || o.ownerId === me));
+    return allOrders.filter(
+      (o) => o.listingId === id && (o.renterId === me || o.ownerId === me)
+    );
   }, [allOrders, id, uid]);
 
-  const active = useMemo(() => myOrders.find(o => o.id === lastOrderId) || myOrders[0] || null, [myOrders, lastOrderId]);
+  const active = useMemo(
+    () => myOrders.find((o) => o.id === lastOrderId) || myOrders[0] || null,
+    [myOrders, lastOrderId]
+  );
 
   const messages = useMemo(() => {
     if (!active?.id) return [];
@@ -94,7 +103,7 @@ export default function RentalDetail() {
   }, [active?.id, tick]);
 
   const flags = listing ? flagRentalItem(listing, city) : { warnings: [], badges: [] };
-  const entityBadges = listing ? getEntityBadges("rental", listing) : []; // NEW
+  const entityBadges = listing ? getEntityBadges("rental", listing) : [];
 
   if (!listing) {
     return (
@@ -113,10 +122,10 @@ export default function RentalDetail() {
   const canBook = start && end && isAvailable(listing, start, end);
   const hasCoords = typeof listing.lat === "number" && typeof listing.lng === "number";
 
-  // ---- Reviews state (Sprint 5) ----
+  // Reviews state
   const params = getRentalReviewParameters();
   const [text, setText] = useState("");
-  const [ratings, setRatings] = useState(params.reduce((m, p) => (m[p] = 4, m), {}));
+  const [ratings, setRatings] = useState(params.reduce((m, p) => ((m[p] = 4), m), {}));
   const reviews = useMemo(() => listRentalReviews(id), [id, tick]);
   const summary = useMemo(() => getRentalAverages(id), [id, tick]);
   const distributions = useMemo(() => getRentalDistributions(id), [id, tick]); // { dist, overall }
@@ -125,23 +134,123 @@ export default function RentalDetail() {
     setRatings((r) => ({ ...r, [p]: Number(v) }));
   }
 
+  // Orders & chat handlers
+  async function onCreateOrder() {
+    try {
+      const o = createRentalOrder({
+        listingId: id,
+        renterId: uid,
+        renterName: user?.name || "You",
+        start,
+        end,
+      });
+      setLastOrderId(o.id);
+      bump();
+      alert("Order created. You can now Pay & Hold or chat with the owner.");
+    } catch (err) {
+      alert(err?.message || "Could not create order.");
+    }
+  }
+
+  function onSend() {
+    if (!active?.id || !msgText.trim()) return;
+    sendOrderMessage(active.id, {
+      fromId: uid,
+      fromName: user?.name || "You",
+      text: msgText.trim(),
+    });
+    setMsgText("");
+    bump();
+  }
+
+  function onPay() {
+    if (!active?.id) return;
+    try {
+      payForOrder(active.id, uid);
+      bump();
+      alert("Hold created and fees paid from wallet.");
+    } catch (e) {
+      alert(e?.message || "Payment failed.");
+    }
+  }
+
+  function onAccept() {
+    if (!active?.id) return;
+    try {
+      acceptOrder(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not accept.");
+    }
+  }
+
+  function onHanded() {
+    if (!active?.id) return;
+    try {
+      markHandedOver(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not mark handed over.");
+    }
+  }
+
+  function onReturned() {
+    if (!active?.id) return;
+    try {
+      markReturned(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not mark returned.");
+    }
+  }
+
+  function onRelease() {
+    if (!active?.id) return;
+    try {
+      releaseEscrow(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not release escrow.");
+    }
+  }
+
+  function onCancel() {
+    if (!active?.id) return;
+    try {
+      cancelOrder(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not cancel.");
+    }
+  }
+
+  function onDispute() {
+    if (!active?.id) return;
+    try {
+      openDispute(active.id, uid);
+      bump();
+    } catch (e) {
+      alert(e?.message || "Could not open dispute.");
+    }
+  }
+
+  // Reviews handlers
   function onSubmitReview(e) {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!user) { alert("Sign in to add a review."); return; }
     addRentalReview(id, {
       userId: uid,
       userName: user.name || "User",
       text,
-      ratings
+      ratings,
     });
     setText("");
-    setRatings(params.reduce((m, p) => (m[p] = 4, m), {}));
+    setRatings(params.reduce((m, p) => ((m[p] = 4), m), {}));
     bump();
     alert("Thanks! Your review has been added.");
   }
 
   function onVote(reviewId, val) {
-    // toggle behavior: clicking again clears
     const current = getMyRentalHelpfulVote(id, reviewId, uid) || 0;
     const next = current === val ? 0 : val;
     voteRentalReviewHelpful(id, reviewId, uid, next);
@@ -150,6 +259,22 @@ export default function RentalDetail() {
 
   const balance = useMemo(() => getBalance(uid), [uid, tick]);
 
+  // Estimated fee breakdown for the currently selected dates
+  const est = useMemo(() => {
+    if (!start || !end) return null;
+    // mirror the pricing logic here
+    const d1 = new Date(`${start}T00:00:00`), d2 = new Date(`${end}T00:00:00`);
+    const days = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1);
+    const unit = Number(listing.price) || 0;
+    let rent;
+    if (listing.pricePer === "month") rent = unit * Math.max(1, Math.ceil(days / 30));
+    else if (listing.pricePer === "week") rent = unit * Math.max(1, Math.ceil(days / 7));
+    else rent = unit * days;
+    const deposit = Number(listing.deposit) || 0;
+    const f = computeRentalFees({ rent, deposit });
+    return { rent, deposit, platformFee: f.platformFee, fixedFee: f.fixedFee };
+  }, [start, end, listing?.price, listing?.pricePer, listing?.deposit]);
+
   return (
     <Layout>
       <Section title={listing.title}>
@@ -157,7 +282,6 @@ export default function RentalDetail() {
           <div className="text-xs text-[var(--color-muted)]">
             {listing.category} · {listing.locality || listing.city}
           </div>
-          {/* NEW: entity badges near title */}
           <div className="flex items-center gap-1 ml-auto">
             {entityBadges.map((b) => (
               <span key={`ent-${b}`} className="inline-flex items-center px-2 py-[2px] rounded-full text-[11px] ring-1 ring-[var(--color-border)]">
@@ -167,7 +291,6 @@ export default function RentalDetail() {
           </div>
         </div>
 
-        {/* Per-listing warning */}
         {flags.warnings?.length ? (
           <div className="mt-2 mb-3 rounded-lg border border-yellow-400/50 bg-yellow-50/60 dark:bg-yellow-900/20 p-3 text-[13px]">
             <div className="font-medium mb-1">Please review carefully</div>
@@ -191,12 +314,7 @@ export default function RentalDetail() {
               {showMap ? "Hide Map" : "Show Map"}
             </button>
           ) : null}
-          <a
-            href={mapsHref(listing)}
-            target="_blank"
-            rel="noreferrer"
-            className="px-2 py-1 text-xs rounded-full ring-1 ring-[var(--color-border)]"
-          >
+          <a href={mapsHref(listing)} target="_blank" rel="noreferrer" className="px-2 py-1 text-xs rounded-full ring-1 ring-[var(--color-border)]">
             Directions
           </a>
           <span className="ml-auto inline-flex items-center gap-1 px-2 py-[2px] text-xs rounded-full ring-1 ring-[var(--color-border)]">
@@ -221,7 +339,6 @@ export default function RentalDetail() {
               {listing.deposit ? <div>Deposit: <span className="font-semibold">{listing.deposit}</span></div> : null}
             </div>
 
-            {/* Availability */}
             <div className="mt-3">
               <div className="font-semibold mb-2">Availability</div>
               {listing.availability?.length ? (
@@ -237,13 +354,25 @@ export default function RentalDetail() {
               )}
             </div>
 
-            {/* Booking */}
             <div className="mt-4">
               <div className="font-semibold mb-2">Book</div>
               <div className="grid grid-cols-2 gap-2">
                 <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="px-3 py-2 rounded border border-[var(--color-border)]"/>
                 <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="px-3 py-2 rounded border border-[var(--color-border)]"/>
               </div>
+
+              {/* Live fee breakdown for selected dates */}
+              {est ? (
+                <div className="mt-3">
+                  <FeeBreakdown
+                    rent={est.rent}
+                    deposit={est.deposit}
+                    platformFee={est.platformFee}
+                    fixedFee={est.fixedFee}
+                  />
+                </div>
+              ) : null}
+
               <button
                 onClick={onCreateOrder}
                 disabled={!canBook}
@@ -257,7 +386,6 @@ export default function RentalDetail() {
               </div>
             </div>
 
-            {/* Contact / Chat */}
             <div className="mt-4 flex gap-2">
               <button
                 onClick={() => openChat({ to: listing.ownerId || "City Chat" })}
@@ -284,7 +412,8 @@ export default function RentalDetail() {
                       <StatusPill status={o.status} />
                     </div>
                     <div className="text-xs text-[var(--color-muted)]">
-                      {o.start} → {o.end} · Total {o.total}
+                      {o.start} → {o.end} · Escrow {o.total}
+                      {o?.feeSummary?.totalFee ? ` · Fees ${o.feeSummary.totalFee}` : ""}
                     </div>
                   </button>
                 ))}
@@ -293,12 +422,10 @@ export default function RentalDetail() {
               <div className="text-sm text-[var(--color-muted)]">No orders yet.</div>
             )}
 
-            {/* Actions for active order */}
             {active ? (
               <div className="mt-3">
                 <div className="font-semibold mb-2">Actions</div>
                 <div className="flex flex-wrap gap-2">
-                  {/* Renter actions */}
                   {!isOwner && active.status === "created" && (
                     <button onClick={onPay} className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Pay & Hold</button>
                   )}
@@ -312,7 +439,6 @@ export default function RentalDetail() {
                     <button onClick={onCancel} className="px-3 py-2 rounded ring-1 ring-[var(--color-border)]">Cancel</button>
                   )}
 
-                  {/* Owner actions */}
                   {isOwner && active.status === "paid_hold" && (
                     <button onClick={onAccept} className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Accept</button>
                   )}
@@ -361,9 +487,8 @@ export default function RentalDetail() {
           </Card>
         </div>
 
-        {/* ---- Ratings & Reviews (Sprint 5) ---- */}
+        {/* Ratings & Reviews */}
         <div className="mt-4 grid md:grid-cols-2 gap-3">
-          {/* Overall & distributions */}
           <Card>
             <div className="font-semibold mb-2">Ratings Summary</div>
             {summary?.count ? (
@@ -377,7 +502,6 @@ export default function RentalDetail() {
                     </div>
                   ))}
                 </div>
-                {/* Distributions 1..5 for each parameter */}
                 <div className="mt-3 space-y-3">
                   {Object.entries(distributions?.dist || {}).map(([p, bucket]) => {
                     const total = Object.values(bucket).reduce((a, b) => a + b, 0);
@@ -397,19 +521,16 @@ export default function RentalDetail() {
                     );
                   })}
                 </div>
-                <div className="text-xs text-[var(--color-muted)] mt-3">
-                  Based on {summary.count} review(s)
-                </div>
+                <div className="text-xs text-[var(--color-muted)] mt-3">Based on {summary.count} review(s)</div>
               </>
             ) : (
               <div className="text-sm text-[var(--color-muted)]">No reviews yet.</div>
             )}
           </Card>
 
-          {/* Add review */}
           <Card>
             <div className="font-semibold mb-2">Add Your Review</div>
-            <form onSubmit={onSubmitReview} className="space-y-3">
+            <form onSubmit={(e) => e.preventDefault()} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 {params.map((p) => (
                   <label key={p} className="text-sm">
@@ -434,19 +555,20 @@ export default function RentalDetail() {
                   className="w-full px-3 py-2 rounded border border-[var(--color-border)] h-24"
                 />
               </div>
-              <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit Review</button>
+              <ProtectedAction guardFn={canReviewOrVote} onAllowed={onSubmitReview}>
+                <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit Review</button>
+              </ProtectedAction>
             </form>
           </Card>
         </div>
 
-        {/* Reviews list with Helpful votes + reviewer badges */}
         <div className="mt-4">
           <div className="text-sm font-semibold mb-2">Recent Reviews</div>
           {reviews.length ? (
             <div className="space-y-3">
               {reviews.map((r) => {
                 const myVote = getMyRentalHelpfulVote(id, r.id, uid);
-                const reviewerBadges = getUserBadges(r.userId); // NEW
+                const reviewerBadges = getUserBadges(r.userId);
                 return (
                   <Card key={r.id}>
                     <div className="flex items-start justify-between gap-3">
@@ -474,23 +596,24 @@ export default function RentalDetail() {
                     </div>
                     {r.text ? <p className="text-sm mt-2">{r.text}</p> : null}
 
-                    {/* Helpful votes */}
                     <div className="mt-2 flex items-center gap-2 text-xs">
                       <span className="text-[var(--color-muted)]">Was this review helpful?</span>
-                      <button
-                        onClick={() => onVote(r.id, 1)}
-                        className={`px-2 py-[2px] rounded ring-1 ring-[var(--color-border)] ${myVote === 1 ? "bg-[var(--color-accent)] text-white" : ""}`}
-                        title="Helpful"
-                      >
-                        👍 {r.helpfulUp || 0}
-                      </button>
-                      <button
-                        onClick={() => onVote(r.id, -1)}
-                        className={`px-2 py-[2px] rounded ring-1 ring-[var(--color-border)] ${myVote === -1 ? "bg-[var(--color-accent)] text-white" : ""}`}
-                        title="Not helpful"
-                      >
-                        👎 {r.helpfulDown || 0}
-                      </button>
+                      <ProtectedAction guardFn={canReviewOrVote} onAllowed={() => onVote(r.id, 1)}>
+                        <button
+                          className={`px-2 py-[2px] rounded ring-1 ring-[var(--color-border)] ${myVote === 1 ? "bg-[var(--color-accent)] text-white" : ""}`}
+                          title="Helpful"
+                        >
+                          👍 {r.helpfulUp || 0}
+                        </button>
+                      </ProtectedAction>
+                      <ProtectedAction guardFn={canReviewOrVote} onAllowed={() => onVote(r.id, -1)}>
+                        <button
+                          className={`px-2 py-[2px] rounded ring-1 ring-[var(--color-border)] ${myVote === -1 ? "bg-[var(--color-accent)] text-white" : ""}`}
+                          title="Not helpful"
+                        >
+                          👎 {r.helpfulDown || 0}
+                        </button>
+                      </ProtectedAction>
                     </div>
                   </Card>
                 );

@@ -6,6 +6,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { addPost } from "../lib/api/posts";
 import { addNotification } from "../lib/api/notifications";
+import ProtectedAction from "../components/ProtectedAction";
+import { canPost } from "../lib/gate";
+import { getSelectedCity } from "../lib/cityState";
 
 export default function SubmitPost() {
   const member = isMember();
@@ -14,14 +17,13 @@ export default function SubmitPost() {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmit() {
     const post = {
       id: `post-${Date.now()}`,
       title,
       text,
       author: u?.name || "Anonymous",
-      city: u?.city || "",
+      city: getSelectedCity() || u?.city || "",
       locality: u?.locality || "",
       ownerId: u?.email || "guest@demo",
       createdAt: Date.now(),
@@ -29,7 +31,6 @@ export default function SubmitPost() {
     };
     addPost(post);
 
-    // Notify poster (mock)
     addNotification({
       toUserId: u?.email || "guest@demo",
       title: "Post submitted for review",
@@ -52,7 +53,7 @@ export default function SubmitPost() {
             </Link>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="max-w-lg mx-auto space-y-3">
+          <form onSubmit={(e)=>e.preventDefault()} className="max-w-lg mx-auto space-y-3">
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -68,9 +69,11 @@ export default function SubmitPost() {
               placeholder="Write something…"
             />
             <div className="text-right">
-              <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">
-                Submit
-              </button>
+              <ProtectedAction guardFn={canPost} onAllowed={doSubmit}>
+                <button className="px-4 py-2 rounded bg-[var(--color-accent)] text-white">
+                  Submit
+                </button>
+              </ProtectedAction>
             </div>
           </form>
         )}

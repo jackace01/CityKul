@@ -1,87 +1,72 @@
 // src/lib/api/wallet.js
-// Local wallet with balances, ledger, and simple ESCROW holds (all localStorage).
-// Safe mocks for testing flows end-to-end.
+// Public wallet API (back-compat) now backed by unified ledger.
+// Existing "holds" remain for now; they’ll be migrated in a later step.
 
 import { loadJSON, saveJSON } from "../storage.js";
+import {
+  getBalance as _getBalance,
+  getLedger as _getLedger,
+  depositImmediate,
+  withdrawImmediate,
+  transferImmediate,
+  addPoints as _addPoints,
+  ensureDemoWallet as _ensureDemoWallet,
+} from "../wallet/ops.js";
+import { getCityEconomy } from "../config/economy.js";
+import { getUser } from "../auth.js";
+import { getMeta as _getMeta } from "../wallet/ledger.js";
+import { startWalletSchedulerForUser } from "../wallet/scheduler.js";
 
-const KEY = (userId) => `citykul:wallet:${userId || "guest"}`;
-const HOLDS_KEY = "citykul:wallet:holds"; // array of {orderId, fromId, toId?, amount, status, memo, ts}
-
-function load(userId) {
-  return loadJSON(KEY(userId), { balance: 0, ledger: [] });
-}
-function save(userId, data) {
-  saveJSON(KEY(userId), data);
-}
-
+/* ---------------------- Exposed getters (back-compat) ---------------------- */
 export function getLedger(userId) {
-  const { ledger } = load(userId);
-  return Array.isArray(ledger) ? ledger : [];
+  return _getLedger(userId);
 }
 export function getBalance(userId) {
-  const { balance } = load(userId);
-  return Number(balance || 0);
+  return _getBalance(userId);
 }
 
-/* --------------------------- Basic ops ---------------------------- */
+/* --------------------------- Basic ops (posted) --------------------------- */
 export function deposit(userId, points, reason = "Deposit") {
-  const cur = load(userId);
-  const amt = Number(points || 0);
-  cur.ledger.unshift({
-    id: `w-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    ts: Date.now(),
-    points: amt,
-    reason
-  });
-  cur.balance = Number(cur.balance || 0) + amt;
-  save(userId, cur);
-  return cur;
+  return depositImmediate(userId, points, reason);
 }
-
 export function withdraw(userId, points, reason = "Withdraw") {
-  const cur = load(userId);
-  const amt = Number(points || 0);
-  if ((cur.balance || 0) < amt) throw new Error("Insufficient balance");
-  cur.ledger.unshift({
-    id: `w-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    ts: Date.now(),
-    points: -amt,
-    reason
-  });
-  cur.balance = Number(cur.balance || 0) - amt;
-  save(userId, cur);
-  return cur;
+  return withdrawImmediate(userId, points, reason);
 }
-
 export function transfer(fromId, toId, points, reason = "Transfer") {
-  if (String(fromId) === String(toId)) return;
-  withdraw(fromId, points, `${reason} → ${toId}`);
-  deposit(toId, points, `${reason} ← ${fromId}`);
+  return transferImmediate(fromId, toId, points, reason);
 }
 
 /** Back-compat helpers used elsewhere */
 export function addPoints(userId, points, reason = "") {
-  return deposit(userId, points, reason || "Adjustment");
+  return _addPoints(userId, points, reason || "Adjustment");
 }
 export function ensureDemoWallet(userId, isMember = false) {
-  const cur = load(userId);
-  if (cur.ledger.length) return cur;
-  if (isMember) deposit(userId, 50, "Welcome bonus for becoming a member");
-  return load(userId);
+  _ensureDemoWallet(userId, isMember);
+  // start per-user scheduler (no-op if already started by other mounts)
+  try {
+    const u = getUser();
+    const uid = userId || u?.email || u?.name || "guest@demo";
+    const city = u?.city || localStorage.getItem("citykul:city") || "Indore";
+    // bootstrap scheduler for this user
+    startWalletSchedulerForUser(uid, city, _getMeta);
+  } catch {}
 }
 
-/* --------------------------- ESCROW holds -------------------------- */
+/* --------------------------- ESCROW holds (legacy) -------------------------- */
+// Keeping your existing holds store intact for now. We’ll unify into the ledger in Step 3.
+const HOLDS_KEY = "citykul:wallet:holds"; // array of {orderId, fromId, toId?, amount, status, memo, ts}
+
 function loadHolds() { return loadJSON(HOLDS_KEY, []); }
 function saveHolds(arr) { saveJSON(HOLDS_KEY, arr || []); }
 
 /**
  * createHold(orderId, fromId, amount, memo?)
- *  - deducts from fromId balance immediately and parks in hold bucket
+ * - withdraws immediately (posted) and parks in holds
  */
 export function createHold(orderId, fromId, amount, memo = "") {
   const amt = Number(amount || 0);
   if (amt <= 0) throw new Error("Invalid hold amount");
-  // deduct
+  // deduct posted immediately for certainty
   withdraw(fromId, amt, `Escrow hold for ${orderId}`);
   const all = loadHolds();
   const exists = all.find(h => h.orderId === orderId && h.status === "held");
@@ -93,7 +78,7 @@ export function createHold(orderId, fromId, amount, memo = "") {
 
 /**
  * releaseHold(orderId, toId)
- *  - moves held funds to the owner
+ * - moves held funds to the owner (posted)
  */
 export function releaseHold(orderId, toId) {
   const all = loadHolds();
@@ -108,7 +93,7 @@ export function releaseHold(orderId, toId) {
 
 /**
  * refundHold(orderId)
- *  - returns held funds back to payer
+ * - returns held funds back to payer (posted)
  */
 export function refundHold(orderId) {
   const all = loadHolds();

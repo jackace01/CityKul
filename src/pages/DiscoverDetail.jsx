@@ -4,7 +4,7 @@ import { useParams, Link } from "react-router-dom";
 import Layout from "../components/Layout";
 import Section from "../components/Section";
 import Card from "../components/Card";
-import { getUser } from "../lib/auth";
+import { getUser, isMember } from "../lib/auth";
 import { getDiscoverItemById } from "../lib/api/discover.js";
 import {
   getReviewParameters,
@@ -17,12 +17,11 @@ import {
 } from "../lib/api/discoverReviews.js";
 import { flagDiscoverItem } from "../lib/guardrails.js";
 
-// Map
 import MapPane from "../components/MapPane";
-// Rating bars
 import RatingBars from "../components/RatingBars";
-// NEW: Roles & Badges
 import { getEntityBadges, getUserBadges } from "../lib/roles";
+import ProtectedAction from "../components/ProtectedAction";
+import { canReviewOrVote } from "../lib/gate";
 
 function mapsHref(place) {
   const hasLatLng = typeof place?.lat === "number" && typeof place?.lng === "number";
@@ -49,12 +48,11 @@ export default function DiscoverDetail() {
   const summary = useMemo(() => getPlaceAverages(id), [id, tick]);
   const dist = useMemo(() => getPlaceDistributions(id), [id, tick]);
   const flags = place ? flagDiscoverItem(place, city) : { warnings: [], badges: [] };
-  const entityBadges = place ? getEntityBadges("discover", place) : []; // NEW
+  const entityBadges = place ? getEntityBadges("discover", place) : [];
 
   function setRating(p, v) { setRatings((r) => ({ ...r, [p]: Number(v) })); }
 
-  function onSubmit(e) {
-    e.preventDefault();
+  function doSubmitReview() {
     if (!user) { alert("Sign in to add a review."); return; }
     addPlaceReview(id, {
       userId: user.email || user.name || "user",
@@ -67,7 +65,7 @@ export default function DiscoverDetail() {
     alert("Thanks! Your review has been added.");
   }
 
-  function onVote(reviewId, vote) {
+  function doVote(reviewId, vote) {
     if (!uid) { alert("Sign in to vote."); return; }
     voteReviewHelpful(id, reviewId, uid, vote);
     setTick(t => t + 1);
@@ -95,7 +93,6 @@ export default function DiscoverDetail() {
           <div className="text-xs text-[var(--color-muted)]">
             {place.category} · {place.locality || place.city}
           </div>
-          {/* NEW: entity badges near title */}
           <div className="flex items-center gap-1 ml-auto">
             {entityBadges.map((b) => (
               <span key={`ent-${b}`} className="inline-flex items-center px-2 py-[2px] rounded-full text-[11px] ring-1 ring-[var(--color-border)]">
@@ -105,7 +102,6 @@ export default function DiscoverDetail() {
           </div>
         </div>
 
-        {/* Unusual-activity warning */}
         {flags.warnings?.length ? (
           <div className="mb-3 rounded-lg border border-yellow-400/50 bg-yellow-50/60 dark:bg-yellow-900/20 p-3 text-[13px]">
             <div className="font-medium mb-1">Heads up: review activity looks unusual</div>
@@ -118,7 +114,6 @@ export default function DiscoverDetail() {
         {place.description ? <p className="text-sm">{place.description}</p> : null}
         {place.address ? <p className="text-xs text-[var(--color-muted)] mt-1">{place.address}</p> : null}
 
-        {/* Map + Directions */}
         <div className="mt-3 flex items-center gap-2">
           {hasCoords ? (
             <button
@@ -187,7 +182,7 @@ export default function DiscoverDetail() {
           {/* Right: Add review */}
           <Card>
             <div className="font-semibold mb-2">Add Your Review</div>
-            <form onSubmit={onSubmit} className="space-y-3">
+            <form onSubmit={(e)=>e.preventDefault()} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 {params.map((p) => (
                   <label key={p} className="text-sm">
@@ -212,7 +207,9 @@ export default function DiscoverDetail() {
                   className="w-full px-3 py-2 rounded border border-[var(--color-border)] h-24"
                 />
               </div>
-              <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit Review</button>
+              <ProtectedAction guardFn={canReviewOrVote} onAllowed={doSubmitReview}>
+                <button className="px-3 py-2 rounded bg-[var(--color-accent)] text-white">Submit Review</button>
+              </ProtectedAction>
             </form>
           </Card>
         </div>
@@ -224,7 +221,7 @@ export default function DiscoverDetail() {
             <div className="space-y-3">
               {reviews.map((r) => {
                 const myVote = getMyHelpfulVote(id, r.id, uid); // 1 | -1 | 0
-                const reviewerBadges = getUserBadges(r.userId); // NEW
+                const reviewerBadges = getUserBadges(r.userId);
                 return (
                   <Card key={r.id}>
                     <div className="flex items-start justify-between gap-3">
@@ -242,20 +239,22 @@ export default function DiscoverDetail() {
                         <div className="text-[11px] text-[var(--color-muted)] mb-2">{new Date(r.ts).toLocaleString()}</div>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <button
-                          onClick={() => onVote(r.id, 1)}
-                          className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === 1 ? "bg-[var(--color-surface)]" : ""}`}
-                          title="Helpful"
-                        >
-                          👍 {r.helpful?.up || 0}
-                        </button>
-                        <button
-                          onClick={() => onVote(r.id, -1)}
-                          className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === -1 ? "bg-[var(--color-surface)]" : ""}`}
-                          title="Not helpful"
-                        >
-                          👎 {r.helpful?.down || 0}
-                        </button>
+                        <ProtectedAction guardFn={canReviewOrVote} onAllowed={() => doVote(r.id, 1)}>
+                          <button
+                            className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === 1 ? "bg-[var(--color-surface)]" : ""}`}
+                            title="Helpful"
+                          >
+                            👍 {r.helpful?.up || 0}
+                          </button>
+                        </ProtectedAction>
+                        <ProtectedAction guardFn={canReviewOrVote} onAllowed={() => doVote(r.id, -1)}>
+                          <button
+                            className={`px-2 py-1 rounded ring-1 ring-[var(--color-border)] ${myVote === -1 ? "bg-[var(--color-surface)]" : ""}`}
+                            title="Not helpful"
+                          >
+                            👎 {r.helpful?.down || 0}
+                          </button>
+                        </ProtectedAction>
                       </div>
                     </div>
 

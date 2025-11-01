@@ -52,12 +52,21 @@ export default function Profile() {
         <div className="grid gap-3 max-w-2xl">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold">Public profile</h3>
-            <Link
-              to={`/user/${encodeURIComponent(myId)}`}
-              className="text-sm px-3 py-1 rounded ring-1 ring-[var(--color-border)]"
-            >
-              View as public →
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/user/${encodeURIComponent(myId)}`}
+                className="text-sm px-3 py-1 rounded ring-1 ring-[var(--color-border)]"
+              >
+                View as public →
+              </Link>
+              <Link
+                to="/admin-notices"
+                className="text-sm px-3 py-1 rounded bg-[var(--color-accent)] text-white"
+                title="Open Government Notice Board – Admin"
+              >
+                Admin Notices
+              </Link>
+            </div>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3">
