@@ -1,6 +1,6 @@
 // src/pages/AdminConfig.jsx
 // Local-only mock admin page: edit per-city economy overrides at runtime.
-// Uses your existing economy.js helpers.
+// Adds Voting Parameters card (DWQM). Uses your existing economy.js helpers.
 
 import { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
@@ -8,6 +8,7 @@ import Section from "../components/Section";
 import Card from "../components/Card";
 import { getSelectedCity, getSelectedLocality, setSelectedCityLocality } from "../lib/cityState";
 import { getCityEconomy, setCityEconomyOverride } from "../lib/config/economy";
+import { quorumInfo } from "../lib/review";
 
 export default function AdminConfig() {
   const [city, setCity] = useState(getSelectedCity() || "Indore");
@@ -22,9 +23,17 @@ export default function AdminConfig() {
   const eff = useMemo(() => getCityEconomy(city), [city, raw]);
   const [quick, setQuick] = useState(toQuick(eff));
 
+  // Voting quick knobs
+  const [voting, setVoting] = useState(toVotingQuick(eff));
+
+  // Live preview of quorum for Events (representative)
+  const qPreview = useMemo(() => quorumInfo(city, "events"), [city, raw, voting]);
+
   useEffect(() => {
     setRaw(JSON.stringify(getOverrideSafe(city), null, 2));
-    setQuick(toQuick(getCityEconomy(city)));
+    const e = getCityEconomy(city);
+    setQuick(toQuick(e));
+    setVoting(toVotingQuick(e));
   }, [city]);
 
   function getOverrideSafe(c) {
@@ -101,13 +110,40 @@ export default function AdminConfig() {
       postingHour: num(quick.postingHour, 23),
       postingMinute: num(quick.postingMinute, 0),
       minWithdrawal: num(quick.minWithdrawal, 100),
+      // NEW: voting patch
+      voting: {
+        activityWindowDays: num(voting.activityWindowDays, 14),
+        thresholds: {
+          low: clamp01(voting.tauLow),
+          medium: clamp01(voting.tauMed),
+          high: clamp01(voting.tauHigh),
+        },
+        targetMin: clamp01(voting.targetMin),
+        targetMax: clamp01(voting.targetMax),
+        verificationBonus: {
+          phone: num(voting.vPhone, 1.0),
+          kyc: num(voting.vKyc, 1.5),
+          address: num(voting.vAddress, 0.5),
+        },
+        rewardPools: {
+          events: num(voting.rEvents, 20),
+          discover: num(voting.rDiscover, 20),
+          marketplace: num(voting.rMarket, 20),
+          jobs: num(voting.rJobs, 30),
+          rentals: num(voting.rRentals, 30),
+          disputes: num(voting.rDisputes, 180),
+          contests: num(voting.rContests, 300),
+          cityHero: num(voting.rHero, 300),
+          appeals: num(voting.rAppeals, 100),
+        },
+        // tiersByModule kept as default unless you add UI here
+      },
     };
-    // merge with existing override
     const cur = getOverrideSafe(city) || {};
     const next = deepMerge(cur, patch);
     setCityEconomyOverride(city, next);
     setRaw(JSON.stringify(next, null, 2));
-    setMsg("Applied Quick Knobs.");
+    setMsg("Applied Quick Knobs (including Voting).");
   }
 
   function useInApp() {
@@ -305,6 +341,108 @@ export default function AdminConfig() {
               </Card>
             </div>
 
+            {/* NEW: Voting parameters */}
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <Card>
+                <div className="font-semibold text-sm">Voting — Thresholds (τ)</div>
+                <div className="mt-2 grid gap-2 text-xs">
+                  <label>Low (Events/Discover/Market)
+                    <input type="number" step="0.01" min="0.5" max="0.95"
+                      value={voting.tauLow}
+                      onChange={e=>setVoting(v=>({...v, tauLow: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>Medium (Jobs/Rentals)
+                    <input type="number" step="0.01" min="0.5" max="0.95"
+                      value={voting.tauMed}
+                      onChange={e=>setVoting(v=>({...v, tauMed: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>High (Contests/Hero/Disputes)
+                    <input type="number" step="0.01" min="0.5" max="0.95"
+                      value={voting.tauHigh}
+                      onChange={e=>setVoting(v=>({...v, tauHigh: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>Activity window (days)
+                    <input type="number" min="1" max="60"
+                      value={voting.activityWindowDays}
+                      onChange={e=>setVoting(v=>({...v, activityWindowDays: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                </div>
+              </Card>
+
+              <Card>
+                <div className="font-semibold text-sm">Dynamic Target p (Quorum)</div>
+                <div className="mt-2 grid gap-2 text-xs">
+                  <label>Target Min (p<sub>min</sub>)
+                    <input type="number" step="0.01" min="0.5" max="0.95"
+                      value={voting.targetMin}
+                      onChange={e=>setVoting(v=>({...v, targetMin: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>Target Max (p<sub>max</sub>)
+                    <input type="number" step="0.01" min="0.5" max="0.95"
+                      value={voting.targetMax}
+                      onChange={e=>setVoting(v=>({...v, targetMax: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                </div>
+
+                <div className="mt-4 text-xs text-[var(--color-muted)]">
+                  <div><b>Preview (Events)</b></div>
+                  <div>Total reviewers: {qPreview.totalReviewers}</div>
+                  <div>Total potential weight: {qPreview.totalWeight}</div>
+                  <div>Active %: {Math.round((qPreview.activeRate||0)*100)}%</div>
+                  <div>p (target): {Math.round((qPreview.targetPercent||0)*100)}%</div>
+                  <div>Needed weight now: <b>{qPreview.neededWeight}</b></div>
+                  <div>τ (threshold): {Math.round((qPreview.tau||0)*100)}%</div>
+                </div>
+              </Card>
+
+              <Card>
+                <div className="font-semibold text-sm">Verification Bonus & Rewards</div>
+                <div className="mt-2 grid gap-2 text-xs">
+                  <label>Phone bonus
+                    <input type="number" step="0.1"
+                      value={voting.vPhone}
+                      onChange={e=>setVoting(v=>({...v, vPhone: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>KYC bonus
+                    <input type="number" step="0.1"
+                      value={voting.vKyc}
+                      onChange={e=>setVoting(v=>({...v, vKyc: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                  <label>Address bonus
+                    <input type="number" step="0.1"
+                      value={voting.vAddress}
+                      onChange={e=>setVoting(v=>({...v, vAddress: e.target.value}))}
+                      className="w-full mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)]" />
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs">
+                  <div className="font-semibold">Reward Pools (pts)</div>
+                  {[
+                    ["Events","rEvents"],["Discover","rDiscover"],["Marketplace","rMarket"],
+                    ["Jobs","rJobs"],["Rentals","rRentals"],["Disputes","rDisputes"],
+                    ["Contests","rContests"],["City Hero","rHero"],["Appeals","rAppeals"],
+                  ].map(([label,key]) => (
+                    <label key={key} className="grid grid-cols-[1fr_auto] items-center gap-2">
+                      <span>{label}</span>
+                      <input type="number"
+                        value={voting[key]}
+                        onChange={e=>setVoting(v=>({...v, [key]: e.target.value}))}
+                        className="w-24 mt-1 px-2 py-1 rounded ring-1 ring-[var(--color-border)] text-right" />
+                    </label>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
             <div className="mt-3">
               <button onClick={applyQuick} className="px-3 py-2 rounded bg-[var(--color-accent)] text-white text-sm">
                 Apply Quick Knobs
@@ -347,8 +485,8 @@ export default function AdminConfig() {
           <Section title="Notes">
             <ul className="text-xs text-[var(--color-muted)] space-y-2">
               <li>Per-city overrides are saved locally in your browser.</li>
-              <li>All money/price math should read from <code>getCityEconomy(city)</code>.</li>
-              <li>When you write ledger entries, include <code>meta.city</code> so Admin Finance can show city-wise stats.</li>
+              <li>Quorum adapts automatically to active reviewers; τ differs by module tier.</li>
+              <li>Verification bonuses + accuracy produce each user’s vote weight (shown in Dashboard).</li>
             </ul>
           </Section>
         </div>
@@ -360,6 +498,7 @@ export default function AdminConfig() {
 // ---- helpers ----
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function isFiniteNum(v){ const n = Number(v); return Number.isFinite(n); }
+function clamp01(v) { const n = Number(v); if (!Number.isFinite(n)) return 0.6; return Math.max(0.5, Math.min(0.95, n)); }
 function deepMerge(base, extra) {
   if (Array.isArray(base)) return [...base];
   if (typeof base !== "object" || base === null) return extra;
@@ -390,5 +529,27 @@ function toQuick(cfg) {
     postingHour: cfg?.postingHour ?? 23,
     postingMinute: cfg?.postingMinute ?? 0,
     minWithdrawal: cfg?.minWithdrawal ?? 100,
+  };
+}
+function toVotingQuick(cfg) {
+  return {
+    activityWindowDays: cfg?.voting?.activityWindowDays ?? 14,
+    tauLow: cfg?.voting?.thresholds?.low ?? 0.60,
+    tauMed: cfg?.voting?.thresholds?.medium ?? 0.66,
+    tauHigh: cfg?.voting?.thresholds?.high ?? 0.75,
+    targetMin: cfg?.voting?.targetMin ?? 0.60,
+    targetMax: cfg?.voting?.targetMax ?? 0.80,
+    vPhone: cfg?.voting?.verificationBonus?.phone ?? 1.0,
+    vKyc: cfg?.voting?.verificationBonus?.kyc ?? 1.5,
+    vAddress: cfg?.voting?.verificationBonus?.address ?? 0.5,
+    rEvents: cfg?.voting?.rewardPools?.events ?? 20,
+    rDiscover: cfg?.voting?.rewardPools?.discover ?? 20,
+    rMarket: cfg?.voting?.rewardPools?.marketplace ?? 20,
+    rJobs: cfg?.voting?.rewardPools?.jobs ?? 30,
+    rRentals: cfg?.voting?.rewardPools?.rentals ?? 30,
+    rDisputes: cfg?.voting?.rewardPools?.disputes ?? 180,
+    rContests: cfg?.voting?.rewardPools?.contests ?? 300,
+    rHero: cfg?.voting?.rewardPools?.cityHero ?? 300,
+    rAppeals: cfg?.voting?.rewardPools?.appeals ?? 100,
   };
 }

@@ -28,6 +28,7 @@ import SubmitEvent from "./pages/SubmitEvent";
 import SubmitJob from "./pages/SubmitJob";
 import SubmitDeal from "./pages/SubmitDeal";
 import SubmitPost from "./pages/SubmitPost";
+import SubmitGig from "./pages/SubmitGig"; // NEW
 
 // Details & utilities
 import EventDetail from "./pages/EventDetail";
@@ -67,8 +68,12 @@ import AdminFinance from "./pages/AdminFinance";
 // NEW: Admin Hub
 import AdminHub from "./pages/AdminHub";
 
-// NEW: Admin Config (Per-city knobs)
+// NEW: Admin Config (per-city knobs)
 import AdminConfig from "./pages/AdminConfig";
+import AdminTrust from "./pages/AdminTrust";
+
+// NEW: User Dashboard
+import Dashboard from "./pages/Dashboard";
 
 // Optional: smart fallback
 import { getUser } from "./lib/auth";
@@ -137,20 +142,23 @@ export default function App() {
 
           {/* NEW: Admin Hub */}
           <Route path="/admin" element={<AdminHub />} />
+          <Route path="/admin/config" element={<AdminConfig />} /> {/* NEW */}
+          <Route path="/admin/trust" element={<AdminTrust />} />
 
-          {/* NEW: Admin Config (Per-city knobs) */}
-          <Route path="/admin/config" element={<AdminConfig />} />
-
-          {/* Legacy redirects (singular -> plural) */}
-          <Route path="/contest" element={<Navigate to="/contests" replace />} />
-          <Route path="/contest/new" element={<Navigate to="/contests/new" replace />} />
-          <Route path="/contest/*" element={<Navigate to="/contests" replace />} />
+          {/* NEW: Dashboard */}
+          <Route path="/dashboard" element={<Dashboard />} />
 
           {/* Submit forms */}
           <Route path="/submit-event" element={<SubmitEvent />} />
           <Route path="/submit-job" element={<SubmitJob />} />
           <Route path="/submit-deal" element={<SubmitDeal />} />
           <Route path="/submit-post" element={<SubmitPost />} />
+          <Route path="/gigs/new" element={<SubmitGig />} /> {/* NEW */}
+
+          {/* Legacy redirects (singular -> plural) */}
+          <Route path="/contest" element={<Navigate to="/contests" replace />} />
+          <Route path="/contest/new" element={<Navigate to="/contests/new" replace />} />
+          <Route path="/contest/*" element={<Navigate to="/contests" replace />} />
 
           {/* Legacy redirects */}
           <Route path="/wallet/ledger" element={<Navigate to="/wallet" replace />} />

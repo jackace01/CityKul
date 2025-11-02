@@ -1,6 +1,9 @@
 // src/lib/auth.js
 // Lightweight auth + profile + membership state (with CityKul keys + legacy migration)
+// + helper accessors for verification profile used by DWQM.
+
 import { loadJSON, saveJSON } from "./storage";
+import { getVerificationProfile, setVerificationProfile } from "./review";
 
 const KEY_USER = "citykul:user";        // legacy was "rezylo:user"
 const KEY_CITY = "citykul:city";
@@ -24,7 +27,6 @@ export function getUser() {
   return loadJSON(KEY_USER, null);
 }
 export function setUser(u) {
-  // Ensure homeCity is preserved (fixed at signup), default to existing city if missing
   const prev = getUser();
   const next = {
     ...prev,
@@ -95,6 +97,15 @@ export function demoSignIn(partial = {}) {
     bio: partial.bio || ""
   };
   setUser(user);
+
+  // Initialize a minimal verification profile for demo if not present
+  const rid = user.email || user.name;
+  const vp = getVerificationProfile(rid);
+  if (!vp.phone && !vp.kyc && !vp.address) {
+    // If they provided a phone value, treat as phone-verified demo
+    setVerificationProfile(rid, { phone: !!user.phone, kyc: false, address: false });
+  }
+
   return user;
 }
 
@@ -103,6 +114,14 @@ export function upgradeToMember() {
   const u = getUser();
   if (!u) return;
   setUser({ ...u, member: true });
+}
+
+// ---------- verification helpers (UI may call these) ----------
+export function getUserVerificationLevel(userId) {
+  return getVerificationProfile(userId);
+}
+export function setUserVerificationLevel(userId, profile) {
+  return setVerificationProfile(userId, profile);
 }
 
 // ---------- util ----------

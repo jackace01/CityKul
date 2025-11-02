@@ -6,7 +6,6 @@ import { getUser, isMember, signOut, subscribeUser } from "../lib/auth";
 import { useChat } from "./ChatProvider";
 import CitySwitcher from "./CitySwitcher";
 import { getSelectedCity, getSelectedLocality, subscribeSelectedCity } from "../lib/cityState";
-import { getActive } from "../lib/subscriptions";
 
 export default function Header() {
   const location = useLocation();
@@ -30,17 +29,16 @@ export default function Header() {
 
   const navItems = [
     { name: "Home", path: "/home" },
-    { name: "Feed", path: "/feed" },
-    { name: "Events", path: "/events" },
+    { name: "Discussions", path: "/feed" },
     { name: "Jobs", path: "/jobs" },
+    { name: "Events", path: "/events" },
     { name: "Marketplace", path: "/marketplace" },
-    { name: "Needs", path: "/needsattention" },
-    { name: "Promotions", path: "/promotions" },
-    { name: "Contests", path: "/contests" }, // NEW
+    { name: "Rentals", path: "/rentals" },
+    { name: "Discover", path: "/discover" },
     { name: "Wallet", path: "/wallet" },
-    { name: "Review", path: "/review" },
-    { name: "Friends", path: "/friends" },
-    { name: "People", path: "/people" },
+    { name: "Membership", path: "/membership" },
+    { name: "Profile", path: "/profile" },
+    { name: "Dashboard", path: "/dashboard" }, // NEW
   ];
 
   const onLogout = () => {
@@ -58,9 +56,6 @@ export default function Header() {
   const home = u?.homeCity || u?.city || "";
   const explorer = home && selCity && home !== selCity;
 
-  const active = getActive(u);
-  const planLabel = active ? (u?.memberPlan === "business" ? "Business" : "Member") : null;
-
   return (
     <>
       <header className="sticky top-0 z-30 bg-[var(--color-bg)]/80 backdrop-blur border-b border-[var(--color-border)]">
@@ -73,7 +68,7 @@ export default function Header() {
               </div>
               <div className="leading-tight">
                 <div className="font-bold">CityKul</div>
-                <div className="text-[11px] text-[var(--color-muted)] -mt-0.5">Reinvent Your Locality</div>
+                <div className="text-[11px] text-[var(--color-muted)] -mt-0.5">Your City, Your Vibe</div>
               </div>
             </Link>
 
@@ -124,12 +119,10 @@ export default function Header() {
                 {u?.name || "Guest"}
                 {member && (
                   <span
-                    title={planLabel ? `${planLabel} — expires ${active ? new Date(active.until).toLocaleDateString() : ""}` : "Member"}
-                    className={`inline-block text-[10px] px-1 py-[1px] rounded ${
-                      u?.memberPlan === "business" ? "bg-purple-600 text-white" : "bg-blue-600 text-white"
-                    }`}
+                    title="Member"
+                    className="inline-block text-[10px] px-1 py-[1px] rounded bg-blue-600 text-white"
                   >
-                    {u?.memberPlan === "business" ? "★" : "✓"}
+                    ✓
                   </span>
                 )}
               </div>

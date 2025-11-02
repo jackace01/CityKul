@@ -55,6 +55,60 @@ export const DEFAULT_ECONOMY = {
     reviewVote: 0.2,      // per valid review vote
     postApproved: 2,      // approved feed post
   },
+
+  // NEW: Voting model (DWQM) — city-tunable
+  voting: {
+    // Activity window used in quorum / "Active %" (days)
+    activityWindowDays: 14,
+
+    // Target approval threshold (tau) per stake tier
+    // Low: Events, Discover, Marketplace; Medium: Jobs, Rentals; High: Contests, Hero, Disputes
+    thresholds: {
+      low: 0.60,
+      medium: 0.66,
+      high: 0.75,
+    },
+
+    // Dynamic quorum growth (controls how much weight is needed as active reviewers grow)
+    // We operate in WEIGHT space; neededWeight = totalWeight * targetPercent
+    // targetPercent is interpolated between [targetMin, targetMax] by activeRate (0..1)
+    targetMin: 0.60,
+    targetMax: 0.80,
+
+    // Optional: module -> stake tier mapping (override if needed)
+    tiersByModule: {
+      events: "low",
+      discover: "low",
+      marketplace: "low",
+      jobs: "medium",
+      rentals: "medium",
+      contests: "high",
+      cityHero: "high",
+      disputes: "high",
+      appeals: "high",
+    },
+
+    // Verification bonuses (V) used in per-user vote weight
+    // W = V + R, where R ∈ [0..2] from historical accuracy
+    verificationBonus: {
+      phone: 1.0,
+      kyc: 1.5,
+      address: 0.5, // optional extra if you enable address verification later
+    },
+
+    // Per-module reward pools (points) distributed proportionally among correct voters
+    rewardPools: {
+      events: 20,
+      discover: 20,
+      marketplace: 20,
+      jobs: 30,
+      rentals: 30,
+      disputes: 180,  // as per your Jobs/Gigs disputes rule
+      contests: 300,
+      cityHero: 300,
+      appeals: 100,
+    },
+  },
 };
 
 const OVERRIDES_KEY = (city) => `citykul:economy:overrides:${city || "default"}`;

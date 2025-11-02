@@ -1,23 +1,13 @@
 // src/lib/review.js
-// Reputation-weighted review engine with dynamic quorum + moderation log.
-// Backward-compatible API for submissions/lists/votes used across modules.
-//
-// Exposed API (unchanged where possible):
-// - getReviewers(city, mod), setReviewers(city, mod, list), ensureReviewer(city, mod, reviewerId)
-// - quorumNeeded(city, mod) -> number (for display; still returns an integer)
-// - submit(mod, payload{city,...})
-// - getSubmissionById(mod, id)
-// - listPending(city, mod), listApproved(city, mod), listRejected(city, mod)
-// - vote(mod, submissionId, reviewerId, approve)
-// - tryFinalize(mod, submissionId) -> updated record | null
-//
-// NEW (optional) helpers:
-// - getReputation(city, mod, reviewerId)
-// - quorumInfo(city, mod) -> { totalReviewers, targetPercent, neededWeight, totalWeight, windowDays, activeRate }
-// - getVotesBox(submissionId)
-// - listModerationLog(filters), clearModerationLog()
+// Reputation/verification-weighted review engine with dynamic quorum + moderation log.
+// Now integrates separate Vote-Weight engine + Reputation deltas post-finalization.
 
 import { loadJSON, saveJSON } from "./storage.js";
+import { getCityEconomy } from "./config/economy.js";
+
+// NEW: separate engines
+import { applyVoteOutcome } from "./voteWeight";
+import { repVoteCorrect, repVoteWrong } from "./reputation";
 
 /* ============================ Keys & constants ============================ */
 
@@ -28,32 +18,47 @@ const APPROVED_KEY = (city, mod) => `citykul:${mod}:approved:${city}`;
 const REJECTED_KEY = (city, mod) => `citykul:${mod}:rejected:${city}`;
 const VOTE_KEY = (id) => `citykul:votes:${id}`;
 
-// NEW: moderation log (global)
+// moderation log (global)
 const MODLOG_KEY = "citykul:modlog";
 
-// NEW: per city+module reputation + activity
-const REPUTATION_KEY = (city, mod) => `citykul:rep:${city}:${mod}`;          // { reviewerId: rep(0.2..1.0) }
-const AGREEMENT_KEY  = (city, mod) => `citykul:agree:${city}:${mod}`;       // { reviewerId: {agree: n, total: n} }
+// agreement + activity (per city+module)
+const AGREEMENT_KEY  = (city, mod) => `citykul:agree:${city}:${mod}`;       // { reviewerId: {agree, total} }
 const ACTIVITY_KEY   = (city, mod) => `citykul:activity:${city}:${mod}`;    // [{ reviewerId, ts }]
-const ACTIVITY_WINDOW_DAYS = 14;
 
-// reputation bounds & step sizes
-const REP_MIN = 0.2;
-const REP_MAX = 1.0;
-const REP_START = 0.5;
-const STEP_AGREE = 0.03;   // gains when a reviewer voted with the final outcome
-const STEP_DISAG = 0.02;   // penalty when a reviewer voted against the final outcome
-const DECAY_ALPHA = 0.02;  // mild decay toward 0.5 each finalization (rep = rep*(1-a) + 0.5*a)
-
-// dynamic quorum: target percent between 0.60 and 0.80 depending on active rate
-const TARGET_MIN = 0.60;
-const TARGET_MAX = 0.80;
+// verification profile store
+const VERIFY_KEY = (rid) => `citykul:verify:profile:${rid}`;
 
 // util
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function now() { return Date.now(); }
 function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+}
+
+/* ============================ Verification profile ============================ */
+
+export function getVerificationProfile(reviewerId) {
+  try {
+    const raw = localStorage.getItem(VERIFY_KEY(reviewerId));
+    const obj = raw ? JSON.parse(raw) : null;
+    if (obj && typeof obj === "object") return {
+      phone: !!obj.phone,
+      kyc: !!obj.kyc,
+      address: !!obj.address,
+    };
+  } catch {}
+  return { phone: false, kyc: false, address: false };
+}
+
+export function setVerificationProfile(reviewerId, profile = {}) {
+  try {
+    const clean = {
+      phone: !!profile.phone,
+      kyc: !!profile.kyc,
+      address: !!profile.address,
+    };
+    localStorage.setItem(VERIFY_KEY(reviewerId), JSON.stringify(clean));
+  } catch {}
 }
 
 /* ============================ Reviewers ============================ */
@@ -70,32 +75,7 @@ export function ensureReviewer(city, mod, reviewerId) {
   saveJSON(REVIEWERS_KEY(city, mod), Array.from(set));
 }
 
-/* ============================ Reputation store ============================ */
-
-function _getRepMap(city, mod) {
-  const map = loadJSON(REPUTATION_KEY(city, mod), {});
-  return map && typeof map === "object" ? map : {};
-}
-function _saveRepMap(city, mod, map) {
-  saveJSON(REPUTATION_KEY(city, mod), map || {});
-}
-export function getReputation(city, mod, reviewerId) {
-  const map = _getRepMap(city, mod);
-  const r = Number(map[reviewerId]);
-  if (Number.isFinite(r)) return clamp(r, REP_MIN, REP_MAX);
-  return REP_START;
-}
-function _setReputation(city, mod, reviewerId, rep) {
-  const map = _getRepMap(city, mod);
-  map[reviewerId] = clamp(Number(rep || REP_START), REP_MIN, REP_MAX);
-  _saveRepMap(city, mod, map);
-}
-function _nudgeTowardBaseline(rep) {
-  // small decay toward 0.5 to avoid extremes over time
-  return clamp(rep * (1 - DECAY_ALPHA) + 0.5 * DECAY_ALPHA, REP_MIN, REP_MAX);
-}
-
-/* ============================ Agreement & activity ============================ */
+/* ============================ Agreement (accuracy) & activity ============================ */
 
 function _getAgreeMap(city, mod) {
   return loadJSON(AGREEMENT_KEY(city, mod), {});
@@ -110,72 +90,95 @@ function _recordAgreement(city, mod, reviewerId, agreed) {
   if (agreed) cur.agree += 1;
   m[reviewerId] = cur;
   _saveAgreeMap(city, mod, m);
+}
 
-  // reputation update
-  const before = getReputation(city, mod, reviewerId);
-  const after = _nudgeTowardBaseline(before + (agreed ? STEP_AGREE : -STEP_DISAG));
-  _setReputation(city, mod, reviewerId, after);
+function _getAccuracy(city, mod, reviewerId) {
+  const m = _getAgreeMap(city, mod);
+  const cur = m[reviewerId] || { agree: 0, total: 0 };
+  if (!cur.total) return 0.5;
+  return clamp(cur.agree / cur.total, 0, 1);
 }
 
 function _pushActivity(city, mod, reviewerId) {
   const arr = loadJSON(ACTIVITY_KEY(city, mod), []);
   arr.push({ reviewerId, ts: now() });
-  // prune old
-  const cutoff = now() - ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const cfg = getCityEconomy(city);
+  const days = Number(cfg?.voting?.activityWindowDays ?? 14);
+  const cutoff = now() - days * 24 * 60 * 60 * 1000;
   const pruned = arr.filter(x => x.ts >= cutoff);
   saveJSON(ACTIVITY_KEY(city, mod), pruned);
 }
 function _activeRate(city, mod) {
   const total = getReviewers(city, mod).length || 0;
   if (!total) return 0;
+  const cfg = getCityEconomy(city);
+  const days = Number(cfg?.voting?.activityWindowDays ?? 14);
   const arr = loadJSON(ACTIVITY_KEY(city, mod), []);
-  const cutoff = now() - ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-  const recent = arr.filter(x => x.ts >= cutoff);
-  const unique = new Set(recent.map(x => x.reviewerId)).size;
+  const cutoff = now() - days * 24 * 60 * 60 * 1000;
+  const unique = new Set(arr.filter(x => x.ts >= cutoff).map(x => x.reviewerId)).size;
   return clamp(unique / total, 0, 1);
 }
 
-/* ============================ Dynamic quorum ============================ */
+/* ============================ Voting weight (legacy W) ============================ */
+
+export function getVoteWeight(city, mod, reviewerId) {
+  // This legacy getter remains for quorum math; your separate vote-weight UI uses lib/voteWeight.
+  const cfg = getCityEconomy(city);
+  const vb = cfg?.voting?.verificationBonus || {};
+  const ver = getVerificationProfile(reviewerId);
+  const V =
+    (ver.phone ? Number(vb.phone ?? 1.0) : 0) +
+    (ver.kyc ? Number(vb.kyc ?? 1.5) : 0) +
+    (ver.address ? Number(vb.address ?? 0.5) : 0);
+
+  // Reputation via accuracy -> R in [0..2]
+  const R = _getAccuracy(city, mod, reviewerId) * 2;
+
+  const W = clamp((V + R), 0, 10);
+  return Number(W.toFixed(2));
+}
 
 function _targetPercent(city, mod) {
-  // linear between 60% and 80% based on activity rate
-  const ar = _activeRate(city, mod); // 0..1
-  return clamp(TARGET_MIN + (TARGET_MAX - TARGET_MIN) * ar, TARGET_MIN, TARGET_MAX);
+  const cfg = getCityEconomy(city);
+  const tMin = Number(cfg?.voting?.targetMin ?? 0.60);
+  const tMax = Number(cfg?.voting?.targetMax ?? 0.80);
+  const ar = _activeRate(city, mod);
+  return clamp(tMin + (tMax - tMin) * ar, 0.5, 0.95);
 }
-function _totalWeight(city, mod) {
+function _moduleThresholdTau(city, mod) {
+  const cfg = getCityEconomy(city);
+  const tiersByModule = cfg?.voting?.tiersByModule || {};
+  const tier = tiersByModule[mod] || "low";
+  const th = cfg?.voting?.thresholds || {};
+  const tau = Number(th[tier]);
+  return Number.isFinite(tau) ? clamp(tau, 0.5, 0.95) : 0.6;
+}
+function _totalPotentialWeight(city, mod) {
   const reviewers = getReviewers(city, mod);
   if (!reviewers.length) return 0;
-  return reviewers.reduce((w, r) => w + getReputation(city, mod, r), 0);
+  return reviewers.reduce((w, r) => w + getVoteWeight(city, mod, r), 0);
 }
 
-/**
- * quorumInfo:
- *  - totalReviewers
- *  - targetPercent (0..1)
- *  - neededWeight (float)
- *  - totalWeight (float)
- *  - windowDays (activity window)
- *  - activeRate (0..1)
- */
+/* ============================ Transparency helpers ============================ */
+
 export function quorumInfo(city, mod) {
   const totalReviewers = getReviewers(city, mod).length;
-  const totalWeight = _totalWeight(city, mod);
+  const totalWeight = _totalPotentialWeight(city, mod);
   const targetPercent = _targetPercent(city, mod);
   const neededWeight = totalWeight * targetPercent;
+  const cfg = getCityEconomy(city);
+  const windowDays = Number(cfg?.voting?.activityWindowDays ?? 14);
+
   return {
     totalReviewers,
     totalWeight: Number(totalWeight.toFixed(2)),
     targetPercent: Number(targetPercent.toFixed(2)),
     neededWeight: Number(neededWeight.toFixed(2)),
-    windowDays: ACTIVITY_WINDOW_DAYS,
+    windowDays,
     activeRate: Number(_activeRate(city, mod).toFixed(2)),
+    tau: Number(_moduleThresholdTau(city, mod).toFixed(2)),
   };
 }
-
-/**
- * Back-compat: return an integer "quorum count" for display,
- * approximated as ceil(totalReviewers * targetPercent).
- */
 export function quorumNeeded(city, mod) {
   const total = getReviewers(city, mod).length;
   const pct = _targetPercent(city, mod);
@@ -185,7 +188,6 @@ export function quorumNeeded(city, mod) {
 /* ============================ Submissions lifecycle ============================ */
 
 export function submit(mod, payload) {
-  // payload MUST include: city
   const id = uid();
   const rec = {
     id,
@@ -204,26 +206,16 @@ export function submit(mod, payload) {
   pend.push(rec);
   saveJSON(PENDING_KEY(rec.city, mod), pend);
 
-  // init vote box
   saveJSON(VOTE_KEY(id), { approvals: [], rejections: [] });
-
   return rec;
 }
-
 export function getSubmissionById(mod, id) {
   const all = loadJSON(SUBMIT_ALL_KEY(mod), []);
   return all.find((r) => r.id === id) || null;
 }
-
-export function listPending(city, mod) {
-  return loadJSON(PENDING_KEY(city, mod), []);
-}
-export function listApproved(city, mod) {
-  return loadJSON(APPROVED_KEY(city, mod), []);
-}
-export function listRejected(city, mod) {
-  return loadJSON(REJECTED_KEY(city, mod), []);
-}
+export function listPending(city, mod) { return loadJSON(PENDING_KEY(city, mod), []); }
+export function listApproved(city, mod) { return loadJSON(APPROVED_KEY(city, mod), []); }
+export function listRejected(city, mod) { return loadJSON(REJECTED_KEY(city, mod), []); }
 
 /* ============================ Voting ============================ */
 
@@ -231,7 +223,6 @@ export function vote(mod, submissionId, reviewerId, approve) {
   const box = loadJSON(VOTE_KEY(submissionId), { approvals: [], rejections: [] });
   const rid = String(reviewerId || "");
 
-  // de-dupe
   box.approvals = (box.approvals || []).filter((u) => u !== rid);
   box.rejections = (box.rejections || []).filter((u) => u !== rid);
 
@@ -240,7 +231,6 @@ export function vote(mod, submissionId, reviewerId, approve) {
 
   saveJSON(VOTE_KEY(submissionId), box);
 
-  // mark reviewer active
   const rec = getSubmissionById(mod, submissionId);
   if (rec) _pushActivity(rec.city, rec.module, rid);
 
@@ -256,13 +246,9 @@ function moveBetweenBuckets(rec, fromKey, toKey, status) {
   to.push(updated);
   saveJSON(toKey(rec.city, rec.module), to);
 
-  // also update in SUBMIT_ALL list
   const all = loadJSON(SUBMIT_ALL_KEY(rec.module), []);
   const idx = all.findIndex((r) => r.id === rec.id);
-  if (idx >= 0) {
-    all[idx] = updated;
-    saveJSON(SUBMIT_ALL_KEY(rec.module), all);
-  }
+  if (idx >= 0) { all[idx] = updated; saveJSON(SUBMIT_ALL_KEY(rec.module), all); }
   return updated;
 }
 
@@ -271,10 +257,9 @@ function moveBetweenBuckets(rec, fromKey, toKey, status) {
 function _pushModLog(entry) {
   const arr = loadJSON(MODLOG_KEY, []);
   arr.unshift(entry);
-  const capped = arr.slice(0, 2000); // keep last 2000 entries
+  const capped = arr.slice(0, 2000);
   saveJSON(MODLOG_KEY, capped);
 }
-
 export function listModerationLog(filters = {}) {
   const { city, module, fromTs, toTs, limit = 500 } = filters || {};
   let rows = loadJSON(MODLOG_KEY, []);
@@ -285,12 +270,9 @@ export function listModerationLog(filters = {}) {
   rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   return rows.slice(0, limit);
 }
+export function clearModerationLog() { saveJSON(MODLOG_KEY, []); }
 
-export function clearModerationLog() {
-  saveJSON(MODLOG_KEY, []);
-}
-
-/* ============================ Finalization ============================ */
+/* ============================ Finalization (+rep & vote-weight updates) ============================ */
 
 export function tryFinalize(mod, submissionId) {
   const rec = getSubmissionById(mod, submissionId);
@@ -298,16 +280,20 @@ export function tryFinalize(mod, submissionId) {
 
   const { approvals = [], rejections = [] } = loadJSON(VOTE_KEY(submissionId), { approvals: [], rejections: [] });
 
-  // weighted tallies
   const city = rec.city;
   const module = rec.module;
 
-  const approvalWeight = approvals.reduce((w, rid) => w + getReputation(city, module, rid), 0);
-  const rejectionWeight = rejections.reduce((w, rid) => w + getReputation(city, module, rid), 0);
+  // weighted tallies with W = V + accuracy contribution
+  const approvalWeight = approvals.reduce((w, rid) => w + getVoteWeight(city, module, rid), 0);
+  const rejectionWeight = rejections.reduce((w, rid) => w + getVoteWeight(city, module, rid), 0);
 
-  const totalWeight = _totalWeight(city, module);
+  const totalWeight = _totalPotentialWeight(city, module);
   const targetPercent = _targetPercent(city, module);
   const neededWeight = totalWeight * targetPercent;
+
+  const tau = _moduleThresholdTau(city, module);
+  const castTotal = approvalWeight + rejectionWeight;
+  const approvalRatio = castTotal > 0 ? (approvalWeight / castTotal) : 0;
 
   function logDecision(updated, outcome) {
     _pushModLog({
@@ -323,26 +309,56 @@ export function tryFinalize(mod, submissionId) {
         totalWeight: Number(totalWeight.toFixed(2)),
       },
       votes: {
+        tau: Number(tau.toFixed(2)),
         approvals: approvals.length,
         rejections: rejections.length,
         approvalWeight: Number(approvalWeight.toFixed(2)),
         rejectionWeight: Number(rejectionWeight.toFixed(2)),
+        approvalRatio: Number(approvalRatio.toFixed(2)),
       },
     });
     return updated;
   }
 
-  // finalize when either side reaches neededWeight
-  if (approvalWeight >= neededWeight) {
+  // finalize only when enough total WEIGHT has participated on either side
+  if (approvalWeight >= neededWeight && approvalRatio >= tau) {
     const updated = moveBetweenBuckets(rec, PENDING_KEY, APPROVED_KEY, "approved");
+
+    // Accuracy bookkeeping
     approvals.forEach((rid) => _recordAgreement(city, module, rid, true));
     rejections.forEach((rid) => _recordAgreement(city, module, rid, false));
+
+    // Update separate vote-weight & reputation per voter
+    approvals.forEach((rid) => {
+      const isMember = false; // wire actual membership lookup if needed
+      applyVoteOutcome(rid, city, isMember, { correct: true });
+      repVoteCorrect(rid, city);
+    });
+    rejections.forEach((rid) => {
+      const isMember = false;
+      applyVoteOutcome(rid, city, isMember, { correct: false });
+      repVoteWrong(rid, city);
+    });
+
     return logDecision(updated, "approved");
   }
-  if (rejectionWeight >= neededWeight) {
+  if (rejectionWeight >= neededWeight && (1 - approvalRatio) >= tau) {
     const updated = moveBetweenBuckets(rec, PENDING_KEY, REJECTED_KEY, "rejected");
+
     approvals.forEach((rid) => _recordAgreement(city, module, rid, false));
     rejections.forEach((rid) => _recordAgreement(city, module, rid, true));
+
+    approvals.forEach((rid) => {
+      const isMember = false;
+      applyVoteOutcome(rid, city, isMember, { correct: false });
+      repVoteWrong(rid, city);
+    });
+    rejections.forEach((rid) => {
+      const isMember = false;
+      applyVoteOutcome(rid, city, isMember, { correct: true });
+      repVoteCorrect(rid, city);
+    });
+
     return logDecision(updated, "rejected");
   }
 
@@ -350,7 +366,6 @@ export function tryFinalize(mod, submissionId) {
 }
 
 /* ============================ Read-only votes box ============================ */
-// For guardrails/anomaly banners (does NOT expose identities publicly in UI)
 export function getVotesBox(submissionId) {
   const box = loadJSON(VOTE_KEY(submissionId), { approvals: [], rejections: [] });
   return {

@@ -40,22 +40,14 @@ export default function AdminHub() {
           {u ? (
             <>
               Signed in as <b>{u.name || u.email || "User"}</b>
-              {!member && (
-                <>
-                  {" · "}
-                  <Link to="/membership" className="underline">Become a member</Link> to access reviewer features.
-                </>
-              )}
+              {!member && <> · <Link to="/membership" className="underline">Become a member</Link> to access reviewer features.</>}
             </>
           ) : (
-            <>
-              You’re not logged in. <Link to="/login" className="underline">Login</Link> to access admin tools.
-            </>
+            <>You’re not logged in. <Link to="/login" className="underline">Login</Link> to access admin tools.</>
           )}
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          {/* Governance & Moderation */}
           <HubCard
             title="Governance & Moderation"
             desc="Community review, government notices, and audit trails."
@@ -64,17 +56,16 @@ export default function AdminHub() {
               { label: "Publish Admin Notice", to: "/admin-notices" },
             ]}
           />
-
-          {/* Finance & Accounting */}
           <HubCard
             title="Finance & Accounting"
             desc="Read-only platform wallet with CSV export and reconciliation."
-            actions={[
-              { label: "Platform Wallet (Finance)", to: "/admin/finance", primary: true },
-            ]}
+            actions={[{ label: "Platform Wallet (Finance)", to: "/admin/finance", primary: true }]}
           />
-
-          {/* Programs & Awards */}
+          <HubCard
+            title="Trust & Weights"
+            desc="Tune Reputation, Vote-Weight, Stake policy, and Appeals per city."
+            actions={[{ label: "Trust & Weights", to: "/admin/trust", primary: true }]}
+          />
           <HubCard
             title="Programs & Awards"
             desc="City Hero spotlight and monthly community contests."
@@ -84,8 +75,6 @@ export default function AdminHub() {
               { label: "Contests", to: "/contests" },
             ]}
           />
-
-          {/* Marketing & Monetization */}
           <HubCard
             title="Marketing & Monetization"
             desc="Promotions/ads rail and business submissions."
@@ -94,8 +83,6 @@ export default function AdminHub() {
               { label: "Submit a Promotion", to: "/submit-deal" },
             ]}
           />
-
-          {/* Directory & Safety */}
           <HubCard
             title="Directory & Safety"
             desc="People directory and safety center."
@@ -104,8 +91,6 @@ export default function AdminHub() {
               { label: "Safety Center", to: "/safety" },
             ]}
           />
-
-          {/* System & Utilities */}
           <HubCard
             title="System & Utilities"
             desc="Settings, notifications, and per-city tuning."

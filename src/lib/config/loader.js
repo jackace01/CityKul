@@ -2,7 +2,7 @@
 // Merges file defaults + localStorage overrides (per-city).
 // Use getEffectiveConfig(city) everywhere you need runtime knobs.
 
-import defaults from "./economy";
+import { DEFAULT_ECONOMY } from "./economy";
 
 const KEY_PREFIX = "citykul:config:overrides:"; // + <city>
 
@@ -71,22 +71,31 @@ export function getOverrideSavedAt(city) {
   }
 }
 
+/**
+ * Effective config = DEFAULT_ECONOMY + local (config) overrides
+ * + derived promotions.effectivePerDay after applying city multiplier.
+ *
+ * Note: You ALSO have per-city overrides under the economy module
+ * (key: citykul:economy:overrides:<city>). This loader keeps a separate
+ * namespace so you can layer additional UI-specific knobs later.
+ */
 export function getEffectiveConfig(city) {
-  // Note: You can read city-specific multipliers from defaults too.
-  // For example: promotions.cityMultiplier[city] overrides promotions.cityMultiplier.default.
   const ov = getOverride(city) || {};
-  let merged = deepMerge(defaults, ov);
+  let merged = deepMerge(DEFAULT_ECONOMY, ov);
 
   // Apply cityMultiplier if present for this city (non-persistent derived rule)
   const cm = merged?.promotions?.cityMultiplier || {};
   const factor = Number.isFinite(cm[city]) ? cm[city] : Number(cm.default ?? 1.0) || 1.0;
+
   if (merged?.promotions?.basePerDay) {
     const scaled = {};
     for (const [slot, base] of Object.entries(merged.promotions.basePerDay)) {
       const n = Number(base);
       scaled[slot] = Number.isFinite(n) ? Math.max(0, Math.round(n * factor * 100) / 100) : base;
     }
-    merged = deepMerge(merged, { promotions: { effectivePerDay: scaled, _appliedMultiplier: factor } });
+    merged = deepMerge(merged, {
+      promotions: { effectivePerDay: scaled, _appliedMultiplier: factor }
+    });
   }
 
   return merged;
