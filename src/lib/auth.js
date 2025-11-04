@@ -5,7 +5,7 @@
 import { loadJSON, saveJSON } from "./storage";
 import { getVerificationProfile, setVerificationProfile } from "./review";
 
-const KEY_USER = "citykul:user";        // legacy was "rezylo:user"
+const KEY_USER = "citykul:user";        // legacy was "citykul:user"
 const KEY_CITY = "citykul:city";
 const KEY_LOCALITY = "citykul:locality";
 
